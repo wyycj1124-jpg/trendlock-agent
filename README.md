@@ -2,6 +2,10 @@
 
 TrendLock 是为 Binance Agent OS Mini Hackathon 制作的只读合约决策原型。它扫描流动性靠前的 USDⓈ-M 山寨币永续合约，把市场分为 `LONG`、`SHORT`、`RANGE` 或 `NO_TRADE`，再用确定性规则计算仓位预算、趋势保护阶梯或独立做多网格草稿。
 
+[公开体验](https://trendlock-agent.jacksonning.chatgpt.site) · [中文演示视频与下载](https://github.com/wyycj1124-jpg/trendlock-agent/releases/tag/v0.1.0) · [提交文案](SUBMISSION.md)
+
+[![TrendLock 中文演示视频](video/public/cover.png)](https://github.com/wyycj1124-jpg/trendlock-agent/releases/download/v0.1.0/trendlock-intro-zh.mp4)
+
 它解决的不是“AI 猜涨跌”，而是持仓一度盈利却没及时移动止损、最后把利润全部吐回的问题。所有百分比相对真实加权开仓均价，而不是杠杆后的仓位收益率：
 
 - 初始保护 −10%；
@@ -28,7 +32,7 @@ TrendLock 是为 Binance Agent OS Mini Hackathon 制作的只读合约决策原�
 
 ## 本地运行
 
-需要 Node.js 22.13 以上。
+需要 Node.js 22.18 以上，推荐 Node.js 24。
 
 ```bash
 npm ci
@@ -60,6 +64,19 @@ node scripts/evaluate-evidence.ts evidence.json > analysis.json
 AI/Agent 负责取数和提名；本仓库的确定性引擎负责规则、否决、风险预算与状态机。零候选是有效结果。低价币不等于低风险，价格跌得多也不等于处在低位。
 
 本项目从 [Setup Radar](https://github.com/jian28277-hash/setup-radar) 获得“只读、证据优先、保留工具轨迹”的产品启发。参考仓库未提供许可证，因此本项目没有复制其代码或素材。
+
+## 演示视频
+
+`video/` 包含完整 Remotion 工程、中文配音、逐句字幕、实际产品截图和合成规则动画。成片为 1920×1080、30 fps、约 102 秒。动画里的风险与阶梯状态直接取自本仓库规则引擎；不是实盘录制或收益证明。
+
+```bash
+cd video
+npm ci
+npx remotion studio --no-open
+npx remotion render TrendLockIntro out/trendlock-intro-zh.mp4
+```
+
+配音使用本地 macOS Tingting 合成语音。随仓库提供的 WAV 可直接在其他系统渲染；只有重新生成配音时才需要 macOS 的 `say` 和 `afinfo`。浏览器的三个 WebMCP 工具已验证读取、模拟、计划生成与无效输入拒绝；它们与 Binance MCP 连接是不同的能力。
 
 ## License
 

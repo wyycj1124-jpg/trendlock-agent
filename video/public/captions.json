@@ -1,0 +1,163 @@
+[
+  {
+    "text": "一笔合约，曾经盈利百分之五。",
+    "startMs": 500,
+    "endMs": 2866.6666666666665,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "没来得及抬高止损，最后却亏损百分之十。",
+    "startMs": 3100,
+    "endMs": 6600,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "趋势锁盈智能体，把你的保护规则变成可解释的交易计划。",
+    "startMs": 6833.333333333333,
+    "endMs": 11333.333333333334,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "扫描山寨币永续合约，识别多头、空头、震荡和不交易。",
+    "startMs": 12733.333333333332,
+    "endMs": 17600,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "逐项核验已收盘Ｋ线、成交量、流动性和买卖价差。",
+    "startMs": 17833.333333333332,
+    "endMs": 22766.666666666664,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "每个候选，都有触发理由和拒绝依据。",
+    "startMs": 23000,
+    "endMs": 25866.666666666664,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "假设做多均价是一百，初始保护价九十。",
+    "startMs": 27266.666666666664,
+    "endMs": 30699.999999999996,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "价格到一百零五，保护价抬到一百零二。",
+    "startMs": 30933.333333333332,
+    "endMs": 34100,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "到一百零八，保护价再抬到一百零五。",
+    "startMs": 34333.33333333333,
+    "endMs": 37300,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "涨到一百一十一，保护价变成一百零八。",
+    "startMs": 37533.33333333333,
+    "endMs": 40633.33333333333,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "回撤触及保护线，模拟退出，止损不会回退。",
+    "startMs": 40866.666666666664,
+    "endMs": 44733.33333333333,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "做空逻辑完全镜像。",
+    "startMs": 46133.333333333336,
+    "endMs": 47866.66666666667,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "均价一百，价格跌到九十五，保护价降到九十八。",
+    "startMs": 48100,
+    "endMs": 52100,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "这里的百分比，始终相对开仓均价，与杠杆收益率无关。",
+    "startMs": 52333.333333333336,
+    "endMs": 56833.333333333336,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "假设权益一万，单笔风险百分之零点五，预算就是五十。",
+    "startMs": 58233.333333333336,
+    "endMs": 62933.333333333336,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "预留示例成本后，名义仓位约四百九十。",
+    "startMs": 63166.66666666667,
+    "endMs": 66466.66666666667,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "杠杆影响保证金占用，实际滑点和强平仍可能超出预算。",
+    "startMs": 66700,
+    "endMs": 71433.33333333334,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "满足震荡条件时，生成独立做多网格草稿。",
+    "startMs": 72833.33333333333,
+    "endMs": 76466.66666666666,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "同时给出区间、间距和硬退出价。",
+    "startMs": 76700,
+    "endMs": 79533.33333333333,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "亏损的趋势仓位，不会被改造成不断补仓的网格。",
+    "startMs": 79766.66666666666,
+    "endMs": 83700,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "当前版本支持行情扫描、风险规划、阶梯模拟和计划导出。",
+    "startMs": 85100,
+    "endMs": 90233.33333333333,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "已提供币安智能体只读数据工作流，网页尚未直连币安ＭＣＰ。",
+    "startMs": 90466.66666666667,
+    "endMs": 96166.66666666667,
+    "timestampMs": null,
+    "confidence": null
+  },
+  {
+    "text": "这是可体验的只读原型，未开放实盘交易，也不保证盈利。",
+    "startMs": 96400,
+    "endMs": 101100,
+    "timestampMs": null,
+    "confidence": null
+  }
+]

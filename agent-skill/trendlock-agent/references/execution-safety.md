@@ -1,5 +1,7 @@
 # Execution safety
 
+Future design notes only. The current skill and web prototype do not perform authenticated operations, monitor live positions, place protective orders, or execute any of the steps below. These notes do not authorize account access or trading.
+
 Before any authenticated operation:
 
 1. Confirm the connected environment (`testnet` or `prod`), account, position mode, margin mode, existing position, existing open orders, and quantitative trading status.
