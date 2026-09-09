@@ -6,6 +6,7 @@ import { advancePaper, stageCandidate, startPaper } from './plans.ts';
 import { importEvidence } from './evidence.ts';
 import { applyAutopilotTick, nextDemoPrice, recoverAutopilot, startAutopilot, stopAutopilot, unrealizedPnl } from './automation.ts';
 import { buildMcpReplacementPrompt, observeSupervisor, reconcileSupervisor, recordStopReplacement, recoverSupervisor, startSupervisor } from './supervisor.ts';
+import { buildApprovalPreflightPrompt, buildApprovalQueue } from './orchestrator.ts';
 
 const near = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);
 
@@ -126,6 +127,70 @@ void test('plan refuses failed rules, stale source and unachievable grid spacing
   const range = markets.find((row) => row.side === 'RANGE')!;
   assert.equal(calculateGrid(range, 10), null);
   assert.throws(() => stageCandidate(range, { ...defaults, gridStepPct: 10 }, 'SYNTHETIC', demoTime, demoTime, false));
+});
+
+void test('approval queue selects only the top two candidates scoring at least 90', () => {
+  const queue = buildApprovalQueue({
+    candidates: demoMarkets(defaults),
+    rules: defaults,
+    source: 'SYNTHETIC',
+    asOf: demoTime,
+    now: demoTime,
+  });
+  assert.deepEqual(queue.proposals.map((proposal) => proposal.symbol), ['LINKUSDT', 'SUIUSDT']);
+  assert.ok(queue.proposals.every((proposal) => proposal.score >= 90));
+  assert.equal(queue.openSlots, 2);
+  assert.equal(queue.portfolioRiskPct, 10);
+  assert.equal(queue.perSlotRiskPct, 5);
+  near(queue.proposals.reduce((sum, proposal) => sum + proposal.riskBudget, 0), 1_000);
+  assert.equal(queue.executionSupport.protectiveConditionalOrder, false);
+  assert.equal(queue.executionSupport.nativeGridOrder, false);
+  const prompt = buildApprovalPreflightPrompt(queue);
+  assert.match(prompt, /不要立即执行任何写操作/);
+  assert.match(prompt, /EXECUTION_BLOCKED/);
+  assert.match(prompt, /stopPrice/);
+});
+
+void test('approval queue excludes occupied symbols and refills only open slots', () => {
+  const oneOpen = buildApprovalQueue({
+    candidates: demoMarkets(defaults),
+    rules: defaults,
+    source: 'SYNTHETIC',
+    asOf: demoTime,
+    now: demoTime,
+    occupiedSymbols: ['linkusdt'],
+  });
+  assert.equal(oneOpen.openSlots, 1);
+  assert.deepEqual(oneOpen.proposals.map((proposal) => proposal.symbol), ['SUIUSDT']);
+
+  const full = buildApprovalQueue({
+    candidates: demoMarkets(defaults),
+    rules: defaults,
+    source: 'SYNTHETIC',
+    asOf: demoTime,
+    now: demoTime,
+    occupiedSymbols: ['LINKUSDT', 'SUIUSDT'],
+  });
+  assert.equal(full.openSlots, 0);
+  assert.equal(full.proposals.length, 0);
+  assert.match(full.blockedReason!, /两个交易槽位/);
+});
+
+void test('approval queue rejects sub-90 and stale live candidates', () => {
+  const lowScore = demoMarkets(defaults).map((candidate) => ({ ...candidate, score: Math.min(candidate.score, 89) }));
+  const empty = buildApprovalQueue({ candidates: lowScore, rules: defaults, source: 'SYNTHETIC', asOf: demoTime, now: demoTime });
+  assert.equal(empty.proposals.length, 0);
+  assert.throws(() => buildApprovalPreflightPrompt(empty), /评分达到 90/);
+
+  const staleQueue = buildApprovalQueue({
+    candidates: demoMarkets(defaults),
+    rules: defaults,
+    source: 'BINANCE_PUBLIC_FUTURES_REST',
+    asOf: demoTime,
+    now: demoTime + 121_000,
+  });
+  assert.equal(staleQueue.proposals.length, 0);
+  assert.match(staleQueue.blockedReason!, /已过期/);
 });
 
 void test('grid uses all possible fills and hard stop in its own risk sizing', () => {

@@ -11,6 +11,7 @@
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint app lib components/ui/button.tsx components/ui/input.tsx",
     "test": "node --test lib/engine.test.ts",
+    "approval:scan": "node scripts/build-approval-queue.ts",
     "typecheck": "tsc --noEmit",
     "format": "oxfmt"
   },

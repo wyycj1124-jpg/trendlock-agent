@@ -58,6 +58,7 @@ import {
   startSupervisor,
   type SupervisorState,
 } from '@/lib/supervisor';
+import { buildApprovalPreflightPrompt, buildApprovalQueue } from '@/lib/orchestrator';
 
 type Mode = 'demo' | 'live' | 'import';
 type Draft = { accountEquity: string; riskPct: string; leverage: string; initialStopPct: string; gridStepPct: string };
@@ -135,6 +136,7 @@ export default function Home() {
   const [supervisorStarting, setSupervisorStarting] = useState(false);
   const [supervisorQuoteFailures, setSupervisorQuoteFailures] = useState(0);
   const [copiedSupervisorPrice, setCopiedSupervisorPrice] = useState<number | null>(null);
+  const [approvalCopied, setApprovalCopied] = useState(false);
   const scanLock = useRef(false);
   const importInput = useRef<HTMLInputElement>(null);
   const [trace, setTrace] = useState([
@@ -150,12 +152,21 @@ export default function Home() {
   const scenarioPct = paper?.marks.at(-1) ?? 0;
   const risk = useMemo(() => calculateRisk(rules, Math.max(entry, 0.000001)), [entry, rules]);
   const grid = selected ? calculateGrid(selected, rules.gridStepPct) : null;
+  const approvalQueue = useMemo(() => buildApprovalQueue({
+    candidates: rows,
+    rules,
+    source,
+    asOf,
+    now: asOf,
+    stale,
+  }), [asOf, rows, rules, source, stale]);
   const draftChanged = JSON.stringify(draft) !== JSON.stringify(draftOf(rules));
   const stamp = new Date(asOf).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) + ' UTC+8';
   const actions = useRef({
     read: () => ({}),
     simulate: (_pct: number) => ({}),
     stage: () => ({}),
+    readApprovalQueue: () => ({}),
     startPaperAutopilot: () => ({}),
     stopPaperAutopilot: () => ({}),
   });
@@ -392,6 +403,12 @@ export default function Home() {
     setError('');
   }
 
+  async function copyApprovalPreflight() {
+    await navigator.clipboard.writeText(buildApprovalPreflightPrompt(approvalQueue));
+    setApprovalCopied(true);
+    setError('');
+  }
+
   useEffect(() => {
     actions.current = {
       read: () => ({
@@ -403,10 +420,12 @@ export default function Home() {
         grid,
         plan,
         autopilot,
+        approvalQueue,
         agentOs: agentEvidence?.agentOs ?? { verified: false, note: '未进行 Agent OS 连接验证' },
       }),
       simulate,
       stage: stagePlan,
+      readApprovalQueue: () => approvalQueue,
       startPaperAutopilot: startPaperAutomation,
       stopPaperAutopilot: stopPaperAutomation,
     };
@@ -436,6 +455,17 @@ export default function Home() {
       execute(input) {
         if (!input || typeof input !== 'object' || Object.keys(input).length) throw new Error('Expected an empty object');
         return actions.current.read();
+      },
+    });
+    register({
+      name: 'read_trendlock_approval_queue',
+      title: '读取TrendLock双槽位审批队列',
+      description: '读取当前评分不低于90分的前两名候选、组合风险分配和执行能力锁。不读取账户、不下单。',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      execute(input) {
+        if (!input || typeof input !== 'object' || Object.keys(input).length) throw new Error('Expected an empty object');
+        return actions.current.readApprovalQueue();
       },
     });
     register({
@@ -496,6 +526,7 @@ export default function Home() {
     setRunning(true);
     setProgress({ done: 0, total: target === 'demo' ? 8 : rules.poolSize });
     setScanFeedback('');
+    setApprovalCopied(false);
     setError('');
     setPlan(null);
     try {
@@ -619,6 +650,46 @@ export default function Home() {
         <div><ArrowDownRight /><span>趋势做空</span><strong>{String(counts.short).padStart(2, '0')}</strong><small>满足硬条件</small></div>
         <div><Waves /><span>震荡候选</span><strong>{String(counts.range).padStart(2, '0')}</strong><small>仅生成网格计划</small></div>
         <div className={`risk-ok ${rules.riskPct >= 5 ? 'high-risk' : ''}`}><ShieldCheck /><span>{rules.riskPct >= 5 ? '高风险预算' : '单笔预算'}</span><strong>{rules.riskPct.toFixed(2)}%</strong><small>风险预算 {risk.maxLoss.toFixed(0)} U</small></div>
+      </section>
+
+      <section className="orchestrator-panel panel" aria-label="双槽位审批编排">
+        <div className="autopilot-heading orchestrator-heading">
+          <div><Bot /><span>双槽位审批编排</span><small>TOP 2 · SCORE ≥90</small></div>
+          <span className="orchestrator-slots">{approvalQueue.proposals.length}/{approvalQueue.openSlots} 待预检</span>
+        </div>
+        <div className="orchestrator-intro">
+          <div>
+            <strong>智能体负责排名与准备，你只确认具体订单</strong>
+            <p>当前页面先按 0 个已占用槽位生成候选；每次预检必须用 Binance MCP 重读真实持仓和委托，再扣除已占用槽位。空出后重新扫描，低于 90 分直接放弃。</p>
+          </div>
+          <Button onClick={() => void copyApprovalPreflight().catch((cause) => setError((cause as Error).message))} disabled={source === 'SYNTHETIC' || stale || !approvalQueue.proposals.length}>
+            {approvalCopied ? <Check /> : <Copy />}{approvalCopied ? '已复制只读预检' : '复制 Binance MCP 预检'}
+          </Button>
+        </div>
+        <div className="orchestrator-metrics">
+          <div><span>最多活跃交易</span><strong>{approvalQueue.maxSlots} 个币种</strong></div>
+          <div><span>最低评分</span><strong>{approvalQueue.minScore}</strong></div>
+          <div><span>组合总风险预算</span><strong>{approvalQueue.portfolioRiskPct.toFixed(2)}%</strong></div>
+          <div><span>每槽位风险预算</span><strong>{approvalQueue.perSlotRiskPct.toFixed(2)}%</strong></div>
+        </div>
+        <div className="orchestrator-grid">
+          {approvalQueue.proposals.map((proposal) => (
+            <article key={proposal.id} className="approval-proposal">
+              <header><span>#{proposal.rank}</span><strong>{proposal.symbol}</strong><b className={proposal.signal.toLowerCase()}>{proposal.signal}</b><em>{proposal.score}</em></header>
+              <p>{proposal.reason}</p>
+              <dl>
+                <div><dt>订单模式</dt><dd>{proposal.orderMode}</dd></div>
+                <div><dt>风险预算</dt><dd>{proposal.riskBudget.toFixed(2)} U</dd></div>
+                <div><dt>指示价格</dt><dd>{price(proposal.indicativeEntry)}</dd></div>
+                <div><dt>初始保护价</dt><dd>{price(proposal.initialStopPrice)}</dd></div>
+                <div><dt>名义仓位</dt><dd>{proposal.notional.toFixed(2)} U</dd></div>
+                <div><dt>估算保证金</dt><dd>{proposal.margin.toFixed(2)} U</dd></div>
+              </dl>
+            </article>
+          ))}
+          {!approvalQueue.proposals.length && <div className="approval-empty">{approvalQueue.blockedReason ?? '当前没有评分达到 90 的候选，不下单。'}</div>}
+        </div>
+        <div className="execution-gate"><LockKeyhole /><p><strong>真实执行锁已启用</strong>当前 Binance MCP 暴露的 U 本位下单参数不包含保护性条件单触发价，也没有原生合约网格工具。系统可自动选多、选空或生成网格草案，但在能同步创建并读回服务器止损前，不会先开仓。</p></div>
       </section>
 
       <section className="autopilot-panel panel" aria-label="自动化试运行">

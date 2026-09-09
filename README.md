@@ -23,7 +23,9 @@ TrendLock 是为 Binance Agent OS Mini Hackathon 制作的合约决策与 PAPER 
 - 只使用已收盘且连续、未过期的 K 线；缺资金费率、异常盘口、过期数据或硬规则失败都会拒绝。
 - 趋势仓位按账户风险预算计算；0.2% 名义仓位成本预留只是示例，不是最大亏损保证。
 - `RANGE` 只生成独立做多网格草稿；它不会把亏损趋势仓位变成网格。
-- 网页内阶梯止损沙盒、计划 JSON 导出，以及 5 个页面级 WebMCP 工具。
+- 网页内阶梯止损沙盒、计划 JSON 导出，以及 6 个页面级 WebMCP 工具。
+- 双槽位审批编排：只提名评分 ≥90 的前两名，已有持仓或开仓委托占用槽位，释放后必须重新扫描。
+- 双槽位模式下，用户设定的 10% 按组合总风险解释，每个槽位最多分配 5%；不因只出现一个候选而放大到 10%。
 - PAPER 自动化：合成行情自动播放，或每 5 秒读取 Binance 公开标记价格，自动推进趋势止损和网格成交状态。
 - MCP 监督执行：录入 MCP 读回的真实成交均价、数量和现有服务器止损后，每 5 秒监控该持仓交易对；触发阶梯时生成待确认改单指令，用户执行并读回核验后才更新本地状态。
 - 自动化状态保存在当前浏览器；刷新或离开页面后恢复为 `HALTED`，不会悄悄续跑。
@@ -34,6 +36,19 @@ TrendLock 是为 Binance Agent OS Mini Hackathon 制作的合约决策与 PAPER 
 网页版本没有直接连接账户，也没有测试网或实盘下单。PAPER 自动化只运行虚拟成交；MCP 监督执行只在浏览器本地保存用户录入的持仓状态并生成确认指令。浏览器页面关闭后不会后台常驻。导入文件里的 `transport: MCP` 是提供方声明，界面始终显示“未验签”。它不提供收益率、胜率、回测或盈利保证。
 
 官方 Binance MCP 支持市场数据、账户和交易，但交易、撤单和转账需要用户逐次确认，且运行在专用 Agentic 子账户。TrendLock 不会绕过这层确认；MCP 实盘执行仍属于人工监督流程。
+
+当前连接暴露的 U 本位新订单工具虽然列出 `STOP_MARKET`，却没有暴露必需的 `stopPrice` / `closePosition` 参数，也没有原生合约网格工具。因此当前版本可以自动排名、生成只读预检和等待确认，但会在真实开仓前返回 `EXECUTION_BLOCKED`：不允许出现“开仓成功、服务器止损未创建”的窗口。
+
+## 双槽位审批流程
+
+1. 用 Binance MCP 只读获取 U 本位余额、非零持仓、全部未成交委托和持仓模式。
+2. 将非零持仓或开仓委托所在币种计为已占用槽位；最多两个不同币种。
+3. 对空槽位执行新一轮公开行情扫描，排除已占用币种，只保留评分 ≥90 且未过期的前 N 名。
+4. 按真实权益、价格精度和数量步长生成一张具体确认卡；此阶段不执行写操作。
+5. 你只确认这张卡上的具体交易。评分、价格、数量或止损变化后旧确认作废，必须重新预检。
+6. 只有在 MCP 可先保证服务器保护单可创建和读回时才能开仓；否则失败关闭。
+
+完整状态和安全契约见 [审批编排说明](docs/APPROVAL_ORCHESTRATION.md)。
 
 ## 使用自动化试运行
 
@@ -75,11 +90,12 @@ npm run build
 
 ## Agent 数据工作流
 
-项目内的 `agent-skill/trendlock-agent/` 是可分发的只读 Skill。已安装 Binance 官方 CLI 时，可选本地适配器只调用公开 GET 端点：
+项目内的 `agent-skill/trendlock-agent/` 是可分发的只读 Skill；`agent-skill/trendlock-executor/` 是独立的审批执行 Skill，不会把市场扫描权限自动升级为交易权限。已安装 Binance 官方 CLI 时，可选本地适配器只调用公开 GET 端点：
 
 ```bash
 node scripts/collect-binance.ts SOLUSDT,LINKUSDT,DOGEUSDT 1h > evidence.json
 node scripts/evaluate-evidence.ts evidence.json > analysis.json
+npm run approval:scan -- 50 LINKUSDT
 ```
 
 也可以让已连接的 Binance MCP 按 `agent-skill/trendlock-agent/references/result-contract.md` 生成 `trendlock.market/v1`，再通过网页“导入 Agent 行情 JSON”。不要把 MCP 地址、授权链接、账户数据或密钥放进 JSON。
