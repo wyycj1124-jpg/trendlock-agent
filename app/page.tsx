@@ -11,6 +11,7 @@ import {
   Check,
   ChevronRight,
   CircleDollarSign,
+  Copy,
   Download,
   Gauge,
   LockKeyhole,
@@ -48,9 +49,26 @@ import {
   unrealizedPnl,
   type AutopilotState,
 } from '@/lib/automation';
+import {
+  buildMcpReplacementPrompt,
+  haltSupervisor,
+  observeSupervisor,
+  recordStopReplacement,
+  recoverSupervisor,
+  startSupervisor,
+  type SupervisorState,
+} from '@/lib/supervisor';
 
 type Mode = 'demo' | 'live' | 'import';
 type Draft = { accountEquity: string; riskPct: string; leverage: string; gridStepPct: string };
+type SupervisorDraft = {
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  positionSide: 'BOTH' | 'LONG' | 'SHORT';
+  entryPrice: string;
+  quantity: string;
+  currentStopPrice: string;
+};
 const draftOf = (rules: Rules): Draft => ({ accountEquity: String(rules.accountEquity), riskPct: String(rules.riskPct), leverage: String(rules.leverage), gridStepPct: String(rules.gridStepPct) });
 const paperFor = (candidate?: Candidate, initialStop = 10) => candidate && (candidate.side === 'LONG' || candidate.side === 'SHORT') ? startPaper(candidate.side, candidate.price, initialStop) : null;
 
@@ -58,6 +76,7 @@ const price = (value: number) =>
   value.toLocaleString('en-US', { maximumFractionDigits: value < 1 ? 6 : 2 });
 const money = (value: number) => value >= 1e9 ? `$${(value / 1e9).toFixed(2)}B` : `$${(value / 1e6).toFixed(1)}M`;
 const AUTOPILOT_STORAGE = 'trendlock.paper-autopilot.v1';
+const SUPERVISOR_STORAGE = 'trendlock.supervisor.v1';
 
 function PriceChart({ candidate }: { candidate: Candidate }) {
   const bars = candidate.candles.slice(-42);
@@ -102,6 +121,19 @@ export default function Home() {
   const [autopilot, setAutopilot] = useState<AutopilotState | null>(null);
   const [autopilotReady, setAutopilotReady] = useState(false);
   const [quoteFailures, setQuoteFailures] = useState(0);
+  const [supervisor, setSupervisor] = useState<SupervisorState | null>(null);
+  const [supervisorDraft, setSupervisorDraft] = useState<SupervisorDraft>({
+    symbol: rows[0]?.symbol ?? '',
+    side: rows[0]?.side === 'SHORT' ? 'SHORT' : 'LONG',
+    positionSide: 'BOTH',
+    entryPrice: '',
+    quantity: '',
+    currentStopPrice: '',
+  });
+  const [supervisorReady, setSupervisorReady] = useState(false);
+  const [supervisorStarting, setSupervisorStarting] = useState(false);
+  const [supervisorQuoteFailures, setSupervisorQuoteFailures] = useState(0);
+  const [copiedSupervisorPrice, setCopiedSupervisorPrice] = useState<number | null>(null);
   const scanLock = useRef(false);
   const importInput = useRef<HTMLInputElement>(null);
   const [trace, setTrace] = useState([
@@ -132,6 +164,10 @@ export default function Home() {
   const autoInventory = autopilot?.kind === 'GRID'
     ? autopilot.lots.filter((lot) => lot.status === 'OPEN').length
     : 0;
+  const supervisorActive = supervisor?.status === 'MONITORING' || supervisor?.status === 'WAITING_CONFIRMATION';
+  const supervisorMovePct = supervisor
+    ? (supervisor.side === 'LONG' ? supervisor.markPrice / supervisor.entryPrice - 1 : 1 - supervisor.markPrice / supervisor.entryPrice) * 100
+    : null;
 
   useEffect(() => {
     if (source === 'SYNTHETIC') return;
@@ -194,6 +230,61 @@ export default function Home() {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [autopilot, source]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let recovered: SupervisorState | null = null;
+    try {
+      const stored = window.localStorage.getItem(SUPERVISOR_STORAGE);
+      if (stored) {
+        const parsed = JSON.parse(stored) as SupervisorState;
+        if (parsed?.schema === 'trendlock.supervisor/v1') recovered = recoverSupervisor(parsed);
+      }
+    } catch {
+      window.localStorage.removeItem(SUPERVISOR_STORAGE);
+    }
+    queueMicrotask(() => {
+      if (cancelled) return;
+      if (recovered) setSupervisor(recovered);
+      setSupervisorReady(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!supervisorReady) return;
+    if (supervisor) window.localStorage.setItem(SUPERVISOR_STORAGE, JSON.stringify(supervisor));
+    else window.localStorage.removeItem(SUPERVISOR_STORAGE);
+  }, [supervisor, supervisorReady]);
+
+  useEffect(() => {
+    if (!supervisorActive || !supervisor) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const next = await fetchMarkPrice(supervisor.symbol);
+        if (cancelled) return;
+        setSupervisor((current) => current &&
+          (current.status === 'MONITORING' || current.status === 'WAITING_CONFIRMATION') &&
+          current.symbol === supervisor.symbol
+          ? observeSupervisor(current, next.markPrice, Math.max(next.time, current.lastTickAt + 1))
+          : current);
+        setSupervisorQuoteFailures(0);
+      } catch {
+        if (cancelled) return;
+        setSupervisorQuoteFailures((current) => {
+          const next = current + 1;
+          if (next >= 3) {
+            setSupervisor((state) => state && (state.status === 'MONITORING' || state.status === 'WAITING_CONFIRMATION')
+              ? haltSupervisor(state, Date.now(), '连续三次读取公开标记价格失败')
+              : state);
+          }
+          return next;
+        });
+      }
+    }, 5_000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [supervisor, supervisorActive]);
+
   function selectCandidate(symbol: string) {
     setSelectedSymbol(symbol);
     setPaper(paperFor(rows.find((row) => row.symbol === symbol), rules.initialStopPct));
@@ -228,6 +319,76 @@ export default function Home() {
     const next = stopAutopilot(autopilot);
     flushSync(() => setAutopilot(next));
     return next;
+  }
+
+  function updateSupervisorDraft(key: keyof SupervisorDraft, value: string) {
+    setSupervisorDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function prefillSupervisor() {
+    if (!selected || (selected.side !== 'LONG' && selected.side !== 'SHORT')) {
+      throw new Error('请选择 LONG 或 SHORT 趋势候选');
+    }
+    const stopPrice = selected.price * (selected.side === 'LONG'
+      ? 1 - rules.initialStopPct / 100
+      : 1 + rules.initialStopPct / 100);
+    setSupervisorDraft({
+      symbol: selected.symbol,
+      side: selected.side,
+      positionSide: 'BOTH',
+      entryPrice: String(selected.price),
+      quantity: String(Number(risk.quantity.toPrecision(8))),
+      currentStopPrice: String(Number(stopPrice.toPrecision(8))),
+    });
+    setError('');
+  }
+
+  async function startLiveSupervisor() {
+    if (supervisorActive) throw new Error('已有一个监督任务正在运行');
+    setSupervisorStarting(true);
+    try {
+      const symbol = supervisorDraft.symbol.trim().toUpperCase();
+      const quote = await fetchMarkPrice(symbol);
+      const next = startSupervisor({
+        symbol,
+        side: supervisorDraft.side,
+        positionSide: supervisorDraft.positionSide,
+        entryPrice: Number(supervisorDraft.entryPrice),
+        quantity: Number(supervisorDraft.quantity),
+        currentStopPrice: Number(supervisorDraft.currentStopPrice),
+        markPrice: quote.markPrice,
+        initialStopPct: rules.initialStopPct,
+      }, quote.time);
+      flushSync(() => {
+        setSupervisor(next);
+        setSupervisorQuoteFailures(0);
+        setCopiedSupervisorPrice(null);
+        setError('');
+      });
+    } finally {
+      setSupervisorStarting(false);
+    }
+  }
+
+  function stopLiveSupervisor() {
+    if (!supervisor) throw new Error('当前没有监督任务');
+    setSupervisor(haltSupervisor(supervisor));
+  }
+
+  async function copySupervisorPrompt() {
+    if (!supervisor?.pendingAction) throw new Error('当前没有待确认改单');
+    const requested = supervisor.pendingAction.requestedTriggerPrice;
+    await navigator.clipboard.writeText(buildMcpReplacementPrompt(supervisor));
+    setCopiedSupervisorPrice(requested);
+    setError('');
+  }
+
+  function recordSupervisorReplacement() {
+    if (!supervisor?.pendingAction) throw new Error('当前没有待确认改单');
+    const requested = supervisor.pendingAction.requestedTriggerPrice;
+    setSupervisor(recordStopReplacement(supervisor, requested, Math.max(Date.now(), supervisor.lastTickAt + 1)));
+    setCopiedSupervisorPrice(null);
+    setError('');
   }
 
   useEffect(() => {
@@ -484,6 +645,61 @@ export default function Home() {
         </div>
       </section>
 
+      <section className="supervisor-panel panel" aria-label="MCP监督执行">
+        <div className="autopilot-heading supervisor-heading">
+          <div><ShieldCheck /><span>MCP 监督执行</span><small>USER CONFIRM</small></div>
+          <span className={`autopilot-status ${(supervisor?.status ?? 'IDLE').toLowerCase()}`}>
+            <i />{supervisor?.status ?? 'IDLE'}
+          </span>
+        </div>
+        <div className="supervisor-intro">
+          <div>
+            <strong>成交后只盯持仓交易对，不重扫整个市场</strong>
+            <p>每 5 秒读取公开标记价格；达到 +5%、+8% 及后续每 +3% 档位时，暂停在待确认状态并生成 MCP 改单指令。页面不持有账户授权，也不会自行下单。</p>
+          </div>
+          <Button variant="secondary" onClick={() => { try { prefillSupervisor(); } catch (cause) { setError((cause as Error).message); } }} disabled={supervisorActive}>用当前计划预填</Button>
+        </div>
+        <div className="supervisor-form">
+          <label htmlFor="supervisor-symbol">交易对<Input id="supervisor-symbol" value={supervisorDraft.symbol} disabled={supervisorActive || supervisorStarting} onChange={(event) => updateSupervisorDraft('symbol', event.target.value.toUpperCase())} /></label>
+          <label htmlFor="supervisor-side">真实持仓方向<select id="supervisor-side" value={supervisorDraft.side} disabled={supervisorActive || supervisorStarting} onChange={(event) => updateSupervisorDraft('side', event.target.value as SupervisorDraft['side'])}><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></label>
+          <label htmlFor="supervisor-position-side">持仓模式字段<select id="supervisor-position-side" value={supervisorDraft.positionSide} disabled={supervisorActive || supervisorStarting} onChange={(event) => updateSupervisorDraft('positionSide', event.target.value as SupervisorDraft['positionSide'])}><option value="BOTH">BOTH（单向）</option><option value="LONG">LONG（双向）</option><option value="SHORT">SHORT（双向）</option></select></label>
+          <label htmlFor="supervisor-entry">真实加权开仓均价<Input id="supervisor-entry" type="number" min="0" step="any" value={supervisorDraft.entryPrice} disabled={supervisorActive || supervisorStarting} onChange={(event) => updateSupervisorDraft('entryPrice', event.target.value)} /></label>
+          <label htmlFor="supervisor-quantity">真实持仓数量<Input id="supervisor-quantity" type="number" min="0" step="any" value={supervisorDraft.quantity} disabled={supervisorActive || supervisorStarting} onChange={(event) => updateSupervisorDraft('quantity', event.target.value)} /></label>
+          <label htmlFor="supervisor-stop">币安现有服务器止损<Input id="supervisor-stop" type="number" min="0" step="any" value={supervisorDraft.currentStopPrice} disabled={supervisorActive || supervisorStarting} onChange={(event) => updateSupervisorDraft('currentStopPrice', event.target.value)} /></label>
+        </div>
+        <div className="supervisor-actions">
+          <Button onClick={() => void startLiveSupervisor().catch((cause) => setError((cause as Error).message))} disabled={supervisorActive || supervisorStarting}><Play />{supervisorStarting ? '读取标记价格…' : '开始监督监控'}</Button>
+          <Button variant="secondary" onClick={() => { try { stopLiveSupervisor(); } catch (cause) { setError((cause as Error).message); } }} disabled={!supervisorActive}><PauseCircle />停止监控</Button>
+          <p><LockKeyhole />“当前计划预填”只是草稿。开始前必须改成 MCP 读回的真实成交均价、数量和已存在的服务器保护单。</p>
+        </div>
+        <div className="supervisor-dashboard">
+          <div className="autopilot-metrics supervisor-metrics">
+            <div><span>当前标记价格</span><strong>{supervisor ? price(supervisor.markPrice) : '—'}</strong></div>
+            <div><span>相对均价有利变化</span><strong className={(supervisorMovePct ?? 0) >= 0 ? 'positive' : 'negative'}>{supervisorMovePct === null ? '—' : `${supervisorMovePct >= 0 ? '+' : ''}${supervisorMovePct.toFixed(2)}%`}</strong></div>
+            <div><span>已核验服务器止损</span><strong>{supervisor ? price(supervisor.currentStopPrice) : '—'}</strong></div>
+            <div><span>当前锁定目标</span><strong>{supervisor ? `${supervisor.currentStopReturnPct >= 0 ? '+' : ''}${supervisor.currentStopReturnPct.toFixed(2)}%` : '—'}</strong></div>
+            <div><span>下一触发档</span><strong>{supervisor?.nextTriggerPct ? `+${supervisor.nextTriggerPct}%` : '—'}</strong></div>
+            <div><span>行情读取失败</span><strong>{supervisorQuoteFailures}/3</strong></div>
+          </div>
+          <div className="supervisor-log">
+            <strong>监督事件</strong>
+            <ol>{(supervisor?.events ?? ['尚未创建真实持仓监督任务']).slice(-6).reverse().map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ol>
+          </div>
+        </div>
+        {supervisor?.pendingAction && (
+          <div className="confirmation-card">
+            <div><Radio /><p><strong>待你确认改单</strong><span>旧保护 {price(supervisor.pendingAction.previousTriggerPrice)} → 新保护 {price(supervisor.pendingAction.requestedTriggerPrice)} · 锁定 {supervisor.pendingAction.requestedLockPct.toFixed(2)}%</span></p></div>
+            <div className="confirmation-actions">
+              <Button onClick={() => void copySupervisorPrompt().catch((cause) => setError((cause as Error).message))}><Copy />{copiedSupervisorPrice === supervisor.pendingAction.requestedTriggerPrice ? '指令已复制' : '复制 Binance MCP 指令'}</Button>
+              <Button variant="secondary" onClick={recordSupervisorReplacement}>我已执行并读回核验</Button>
+            </div>
+            <details><summary>查看完整待确认指令</summary><pre>{buildMcpReplacementPrompt(supervisor)}</pre></details>
+          </div>
+        )}
+        {supervisor?.status === 'RECONCILIATION_REQUIRED' && <div className="reconciliation-note"><X /><p><strong>停止推断，必须对账</strong>标记价格已越过页面记录的止损。请在 Codex 中读取真实持仓和当前挂单；不要假定成交，也不要盲目重试。</p></div>}
+        {supervisor?.status === 'HALTED' && <div className="reconciliation-note"><PauseCircle /><p><strong>本地监控已停止</strong>币安上已经存在的服务器止损不会因此消失；重新开始前，请先用 MCP 读回最新持仓和保护单，再更新上方字段。</p></div>}
+      </section>
+
       <div className="workspace">
         <aside className="candidate-panel panel">
           <div className="panel-title"><div><Radar /><span>机会队列</span></div><small>按证据评分</small></div>
@@ -573,10 +789,10 @@ export default function Home() {
           {trace.map((item, index) => <div key={item}><i>{String(index + 1).padStart(2, '0')}</i><span>{item}</span>{index < trace.length - 1 && <ChevronRight />}</div>)}
         </div>
         {paper && <details className="plan-details"><summary>阶梯模拟事件 · {paper.status}</summary><ol>{paper.events.map((event, index) => <li key={index}>{event}</li>)}</ol></details>}
-        <p><strong>连接边界：</strong>网页公开行情通过 Binance Futures REST 读取，并可自动运行 PAPER 趋势/网格状态机。Agent 数据仍由本地只读适配器或已连接的 MCP 工具采集后导入；网页不持有账户授权。Binance MCP 的每次实盘写操作仍需用户确认。</p>
+        <p><strong>连接边界：</strong>网页公开行情通过 Binance Futures REST 读取，并可自动运行 PAPER 趋势/网格状态机。MCP 监督执行仅生成带真实持仓参数的待确认改单指令；网页不持有账户授权。Binance MCP 的每次实盘写操作仍需用户确认并读回核验。</p>
       </section>
 
-      <footer><span>Binance Agent OS 工作流原型</span><span>只读选币 · PAPER 自动化 · MCP 人工确认</span><span>非投资建议 · 无盈利保证</span></footer>
+      <footer><span>Binance Agent OS 工作流原型</span><span>只读选币 · PAPER 自动化 · MCP 监督确认</span><span>非投资建议 · 无盈利保证</span></footer>
     </main>
   );
 }

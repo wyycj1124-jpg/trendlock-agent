@@ -5,6 +5,7 @@ import { demoMarkets, demoTime } from './demo.ts';
 import { advancePaper, stageCandidate, startPaper } from './plans.ts';
 import { importEvidence } from './evidence.ts';
 import { applyAutopilotTick, nextDemoPrice, recoverAutopilot, startAutopilot, stopAutopilot, unrealizedPnl } from './automation.ts';
+import { buildMcpReplacementPrompt, observeSupervisor, reconcileSupervisor, recordStopReplacement, recoverSupervisor, startSupervisor } from './supervisor.ts';
 
 const near = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);
 
@@ -215,4 +216,53 @@ void test('paper autopilot halts on stale ticks, refresh recovery or explicit st
   assert.equal(recoverAutopilot(started, 2_000).status, 'HALTED');
   assert.equal(stopAutopilot(started, 2_000).status, 'STOPPED_BY_USER');
   assert.ok(nextDemoPrice(started) > candidate.price);
+});
+
+void test('supervisor queues a stop replacement but never applies it before confirmation', () => {
+  let state = startSupervisor({ symbol: 'solusdt', side: 'LONG', entryPrice: 100, quantity: 2, currentStopPrice: 90 }, 1_000);
+  state = observeSupervisor(state, 105, 2_000);
+  assert.equal(state.status, 'WAITING_CONFIRMATION');
+  assert.equal(state.currentStopPrice, 90);
+  assert.equal(state.pendingAction?.requestedTriggerPrice, 102);
+  const prompt = buildMcpReplacementPrompt(state);
+  assert.match(prompt, /不要立即执行/);
+  assert.match(prompt, /先创建更紧的新保护单/);
+  state = recordStopReplacement(state, 102, 3_000);
+  assert.equal(state.status, 'MONITORING');
+  assert.equal(state.currentStopPrice, 102);
+});
+
+void test('supervisor keeps the old server stop active while confirmation is pending', () => {
+  let state = startSupervisor({ symbol: 'ETHUSDT', side: 'SHORT', positionSide: 'SHORT', entryPrice: 100, quantity: 1, currentStopPrice: 110 }, 1_000);
+  state = observeSupervisor(state, 95, 2_000);
+  assert.equal(state.pendingAction?.requestedTriggerPrice, 98);
+  state = observeSupervisor(state, 97, 3_000);
+  assert.equal(state.status, 'WAITING_CONFIRMATION');
+  assert.equal(state.currentStopPrice, 110);
+  assert.equal(state.pendingAction?.requestedTriggerPrice, 98);
+  assert.equal(state.events.length, 2);
+});
+
+void test('supervisor discards a pending replacement if price crosses it before confirmation', () => {
+  let state = startSupervisor({ symbol: 'ETHUSDT', side: 'LONG', entryPrice: 100, quantity: 1, currentStopPrice: 90 }, 1_000);
+  state = observeSupervisor(state, 105, 2_000);
+  assert.equal(state.pendingAction?.requestedTriggerPrice, 102);
+  state = observeSupervisor(state, 101, 3_000);
+  assert.equal(state.status, 'RECONCILIATION_REQUIRED');
+  assert.equal(state.pendingAction, null);
+  assert.equal(state.currentStopPrice, 90);
+});
+
+void test('crossing the recorded server stop forces account reconciliation', () => {
+  let state = startSupervisor({ symbol: 'SOLUSDT', side: 'LONG', entryPrice: 100, quantity: 2, currentStopPrice: 90 }, 1_000);
+  state = observeSupervisor(state, 89, 2_000);
+  assert.equal(state.status, 'RECONCILIATION_REQUIRED');
+  assert.equal(reconcileSupervisor(state, { quantity: 0, markPrice: 89 }, 3_000).status, 'CLOSED');
+});
+
+void test('refresh recovery halts supervisor instead of silently resuming', () => {
+  const state = startSupervisor({ symbol: 'SOLUSDT', side: 'LONG', entryPrice: 100, quantity: 2, currentStopPrice: 90 }, 1_000);
+  const recovered = recoverSupervisor(state, 2_000);
+  assert.equal(recovered.status, 'HALTED');
+  assert.match(recovered.events.at(-1)!, /重新读取账户对账/);
 });
