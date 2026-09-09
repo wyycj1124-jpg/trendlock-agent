@@ -17,17 +17,17 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: 'TrendLock Agent · 趋势锁盈智能体',
-  description: '基于 Binance Agent OS 的U本位合约机会扫描、硬风控与阶梯止损演示。',
+  description: '基于 Binance Agent OS 的U本位合约机会扫描、硬风控与PAPER自动化。',
   openGraph: {
     title: 'TrendLock Agent · 趋势锁盈智能体',
-    description: '趋势识别 · 硬风控 · 阶梯止损。Binance Agent OS 黑客松原型。',
+    description: '趋势识别 · 硬风控 · PAPER自动化。Binance Agent OS 黑客松原型。',
     type: 'website',
     images: [{ url: '/og.png', width: 1200, height: 630, alt: 'TrendLock 趋势锁盈智能体' }],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'TrendLock Agent · 趋势锁盈智能体',
-    description: '趋势识别 · 硬风控 · 阶梯止损。',
+    description: '趋势识别 · 硬风控 · PAPER自动化。',
     images: ['/og.png'],
   },
 };

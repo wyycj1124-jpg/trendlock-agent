@@ -4,6 +4,7 @@ import { calculateGrid, calculateRisk, calculateStop, defaults, evaluateMarket, 
 import { demoMarkets, demoTime } from './demo.ts';
 import { advancePaper, stageCandidate, startPaper } from './plans.ts';
 import { importEvidence } from './evidence.ts';
+import { applyAutopilotTick, nextDemoPrice, recoverAutopilot, startAutopilot, stopAutopilot, unrealizedPnl } from './automation.ts';
 
 const near = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);
 
@@ -155,4 +156,63 @@ void test('import rejects malformed trace and duplicate symbols; MCP assertion s
   const result = importEvidence({ ...raw, transport: 'MCP', tools: [{ name: 'example_tool', status: 'SUCCESS', symbols: [raw.markets[0].symbol] }] });
   assert.equal(result.source, 'IMPORTED_MCP');
   assert.equal(result.agentOs.verified, false);
+});
+
+void test('trend paper autopilot advances protection and closes without reopening', () => {
+  const candidate = demoMarkets(defaults).find((row) => row.side === 'LONG')!;
+  const entry = candidate.price;
+  let state = startAutopilot(candidate, defaults, 1_000);
+  assert.equal(state.kind, 'TREND');
+  state = applyAutopilotTick(state, entry * 1.052, 2_000);
+  assert.equal(state.kind, 'TREND');
+  near(state.paper.stop.stopReturnPct, 2);
+  state = applyAutopilotTick(state, entry * 1.083, 3_000);
+  assert.equal(state.kind, 'TREND');
+  near(state.paper.stop.stopReturnPct, 5);
+  state = applyAutopilotTick(state, entry * 1.049, 4_000);
+  assert.equal(state.status, 'STOPPED_OUT');
+  const closed = applyAutopilotTick(state, entry * 1.2, 5_000);
+  assert.equal(closed, state);
+  assert.equal(unrealizedPnl(state), 0);
+});
+
+void test('short paper autopilot uses underlying price movement, not leveraged ROE', () => {
+  const candidate = demoMarkets(defaults).find((row) => row.side === 'SHORT')!;
+  let state = startAutopilot(candidate, defaults, 1_000);
+  state = applyAutopilotTick(state, candidate.price * .95, 2_000);
+  assert.equal(state.kind, 'TREND');
+  near(state.paper.stop.stopReturnPct, 2);
+  assert.ok(unrealizedPnl(state) > 0);
+});
+
+void test('paper autopilot preserves a configured initial stop distance', () => {
+  const candidate = demoMarkets(defaults).find((row) => row.side === 'LONG')!;
+  let state = startAutopilot(candidate, { ...defaults, initialStopPct: 7 }, 1_000);
+  assert.equal(state.kind, 'TREND');
+  near(state.paper.stop.stopReturnPct, -7);
+  state = applyAutopilotTick(state, candidate.price * 1.02, 2_000);
+  assert.equal(state.kind, 'TREND');
+  near(state.paper.stop.stopReturnPct, -7);
+});
+
+void test('grid paper autopilot fills a crossed level, sells the rebound and tracks pnl', () => {
+  const candidate = demoMarkets(defaults).find((row) => row.side === 'RANGE')!;
+  let state = startAutopilot(candidate, defaults, 1_000);
+  assert.equal(state.kind, 'GRID');
+  const lot = state.lots.filter((item) => item.status === 'WAITING_BUY').sort((a, b) => b.buyPrice - a.buyPrice)[0];
+  state = applyAutopilotTick(state, lot.buyPrice * .999, 2_000);
+  assert.equal(state.kind, 'GRID');
+  assert.ok(state.lots.some((item) => item.status === 'OPEN'));
+  state = applyAutopilotTick(state, lot.sellPrice * 1.001, 3_000);
+  assert.equal(state.kind, 'GRID');
+  assert.ok(state.realizedPnl > 0);
+});
+
+void test('paper autopilot halts on stale ticks, refresh recovery or explicit stop', () => {
+  const candidate = demoMarkets(defaults).find((row) => row.side === 'LONG')!;
+  const started = startAutopilot(candidate, defaults, 1_000);
+  assert.equal(applyAutopilotTick(started, candidate.price, 32_000).status, 'HALTED');
+  assert.equal(recoverAutopilot(started, 2_000).status, 'HALTED');
+  assert.equal(stopAutopilot(started, 2_000).status, 'STOPPED_BY_USER');
+  assert.ok(nextDemoPrice(started) > candidate.price);
 });

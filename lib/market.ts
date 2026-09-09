@@ -14,6 +14,7 @@ type ExchangeInfo = {
 type Ticker = { symbol: string; lastPrice: string; priceChangePercent: string; quoteVolume: string };
 type Book = { symbol: string; bidPrice: string; askPrice: string };
 type Premium = { symbol: string; lastFundingRate: string };
+type MarkPrice = { symbol: string; markPrice: string; time: number };
 
 async function read<T>(path: string): Promise<T> {
   const response = await fetch(FUTURES_SOURCE + path, {
@@ -22,6 +23,16 @@ async function read<T>(path: string): Promise<T> {
   });
   if (!response.ok) throw new Error(response.status === 451 ? '币安限制此网络地区访问（HTTP 451）；请使用符合平台地区要求的官方连接' : response.status === 429 ? '币安行情限流，请稍后重试' : `Binance Futures HTTP ${response.status}`);
   return response.json() as Promise<T>;
+}
+
+export async function fetchMarkPrice(symbol: string) {
+  if (!/^[A-Z0-9]{5,24}$/.test(symbol)) throw new Error('交易对格式无效');
+  const result = await read<MarkPrice>(`/fapi/v1/premiumIndex?symbol=${encodeURIComponent(symbol)}`);
+  const markPrice = Number(result.markPrice);
+  if (result.symbol !== symbol || !Number.isFinite(markPrice) || markPrice <= 0 || !Number.isFinite(result.time)) {
+    throw new Error('币安标记价格数据异常');
+  }
+  return { symbol, markPrice, time: result.time };
 }
 
 export async function scanFutures(rules: Rules, onProgress?: (done: number, total: number) => void) {
