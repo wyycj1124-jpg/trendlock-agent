@@ -111,6 +111,7 @@ export default function Home() {
   const [prompt, setPrompt] = useState('扫描 1 小时 U 本位永续，识别趋势多空与震荡；单笔风险 10%，硬止损 7%，3 倍杠杆，网格 3%。');
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: defaults.poolSize });
+  const [scanFeedback, setScanFeedback] = useState('');
   const [error, setError] = useState('');
   const [asOf, setAsOf] = useState(demoTime);
   const [source, setSource] = useState('SYNTHETIC');
@@ -493,6 +494,8 @@ export default function Home() {
     if (target === 'import') { importInput.current?.click(); return; }
     scanLock.current = true;
     setRunning(true);
+    setProgress({ done: 0, total: target === 'demo' ? 8 : rules.poolSize });
+    setScanFeedback('');
     setError('');
     setPlan(null);
     try {
@@ -500,7 +503,9 @@ export default function Home() {
       const nextRules = parseIntent(prompt, fromDraft);
       let next: Candidate[];
       if (target === 'demo') {
+        await new Promise((resolve) => window.setTimeout(resolve, 350));
         next = demoMarkets(nextRules);
+        setProgress({ done: next.length, total: next.length });
         setAsOf(demoTime);
         setSource('SYNTHETIC');
         setTrace(['提取已支持的规则字段', '生成可复现合成K线', '计算 LONG / SHORT / RANGE / NO_TRADE', '等待生成计划草稿']);
@@ -520,8 +525,11 @@ export default function Home() {
       setAgentEvidence(null);
       setStale(false);
       setMode(target);
+      const finishedAt = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+      setScanFeedback(`${target === 'demo' ? '合成演示' : '公开行情'}扫描完成 · ${next.length} 个交易对 · ${finishedAt}`);
     } catch (cause) {
       setStale(true);
+      setScanFeedback('');
       setError(`${(cause as Error).message}。已保留上一轮结果，不代表当前行情。`);
     } finally {
       setRunning(false);
@@ -532,6 +540,7 @@ export default function Home() {
   function updateRule(key: keyof Draft, value: string) {
     setDraft((current) => ({ ...current, [key]: value }));
     setPlan(null);
+    setScanFeedback('');
   }
 
   function applyDraft() {
@@ -594,12 +603,13 @@ export default function Home() {
         </div>
         <div className="command-icon"><Sparkles /></div>
         <label htmlFor="agent-command" className="sr-only">输入智能体任务</label>
-        <Input id="agent-command" value={prompt} disabled={running || autopilot?.status === 'RUNNING'} onChange={(event) => setPrompt(event.target.value)} className="command-input" />
+        <Input id="agent-command" value={prompt} disabled={running || autopilot?.status === 'RUNNING'} onChange={(event) => { setPrompt(event.target.value); setScanFeedback(''); }} className="command-input" />
         <Button className="scan-button" onClick={() => void runScan()} disabled={running || autopilot?.status === 'RUNNING'}>
-          {running ? <RefreshCw className="spin" /> : <Radar />}{running ? `${progress.done}/${progress.total}` : '运行扫描'}
+          {running ? <RefreshCw className="spin" /> : scanFeedback ? <Check /> : <Radar />}{running ? `${progress.done}/${progress.total}` : scanFeedback ? '重新扫描' : '运行扫描'}
         </Button>
       </section>
       <div className="command-help">规则解析器支持周期、账户风险、硬止损、杠杆、量比和格距；未接入大模型。修改文字后需重新扫描。<Button variant="ghost" size="sm" disabled={running || draftChanged || autopilot?.status === 'RUNNING'} onClick={() => importInput.current?.click()}>导入 Agent 行情 JSON</Button><Input ref={importInput} className="hidden" type="file" accept="application/json,.json" aria-label="导入Agent原始行情" onChange={(event) => void uploadEvidence(event.target.files?.[0])} /></div>
+      {scanFeedback && <output className="scan-feedback" aria-live="polite"><Check />{scanFeedback}</output>}
       {error && <div className="error-banner" role="alert"><X />{error}</div>}
       <div className="source-banner"><span className={source === 'SYNTHETIC' ? 'demo-source' : 'live-source'}>{source}</span><span>{stamp}</span><span>{stale ? '证据已失效 · 禁止生成计划' : source === 'SYNTHETIC' ? '合成行情 · 非回测 · 非实时信号' : '行情快照 · 两分钟后失效'}</span></div>
 

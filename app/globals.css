@@ -79,6 +79,8 @@ button { cursor: pointer; }
 .source-banner span:last-child { margin-left: auto; }
 .source-banner .demo-source, .source-banner .live-source { padding: 3px 6px; border-radius: 4px; color: #9da6af; background: #1a2027; }
 .source-banner .live-source { color: #62d5a4; background: rgb(101 214 166 / 9%); }
+.scan-feedback { margin: 0 26px 8px; min-height: 36px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; color: #8ce0b8; border: 1px solid rgb(101 214 166 / 28%); border-radius: 9px; background: rgb(101 214 166 / 7%); font-size: 12px; }
+.scan-feedback svg { width: 14px; }
 .error-banner { margin: 0 26px 8px; min-height: 36px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; color: #f2a0a6; border: 1px solid rgb(244 128 136 / 28%); border-radius: 9px; background: rgb(244 128 136 / 7%); font-size: 10px; }
 .error-banner svg { width: 14px; }
 
@@ -388,6 +390,7 @@ button:focus-visible, summary:focus-visible { outline: 2px solid var(--primary);
   footer { flex-wrap: wrap; padding: 12px 15px; }
   .command-help { margin-inline: 15px; }
   .command-help button { margin-left: 0; }
+  .scan-feedback { margin-inline: 15px; }
   .summary-strip > div { padding: .75rem; }
   .summary-strip svg { display: none; }
   .summary-strip strong { font-size: 1.1rem; }
