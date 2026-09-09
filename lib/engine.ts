@@ -74,9 +74,9 @@ export const defaults: Rules = {
   maxSpreadBps: 8,
   minVolumeRatio: 1.2,
   accountEquity: 10_000,
-  riskPct: 0.5,
+  riskPct: 10,
   leverage: 3,
-  initialStopPct: 10,
+  initialStopPct: 7,
   gridStepPct: 3,
 };
 
@@ -88,7 +88,7 @@ export function validateRules(rules: Rules) {
     [rules.maxSpreadBps, 0.1, 100, '最大价差'],
     [rules.minVolumeRatio, 0.2, 10, '最小量比'],
     [rules.accountEquity, 1, 1e12, '账户权益'],
-    [rules.riskPct, 0.05, 5, '单笔风险'],
+    [rules.riskPct, 0.05, 10, '单笔风险'],
     [rules.leverage, 1, 3, '原型杠杆上限'],
     [rules.initialStopPct, 1, 30, '初始止损'],
     [rules.gridStepPct, 0.2, 10, '网格间距'],
@@ -264,7 +264,7 @@ export function calculateStop(
   mark: number,
   extreme = mark,
   previousStop?: number,
-  initialStopPct = 10,
+  initialStopPct = 7,
 ): StopState {
   if (![entry, mark, extreme].every((value) => Number.isFinite(value) && value > 0)) {
     throw new Error('止损计算价格无效');
@@ -337,10 +337,12 @@ export function parseIntent(text: string, current: Rules): Rules {
   const leverage = text.match(/(\d+(?:\.\d+)?)\s*倍杠杆/) ?? text.match(/杠杆\s*(\d+(?:\.\d+)?)\s*倍?/);
   const volume = text.match(/(?:量比|放量)\s*(?:至少|大于|≥|>=)?\s*(\d+(?:\.\d+)?)/);
   const grid = text.match(/(?:网格|一格|格距|间距)\s*(\d+(?:\.\d+)?)\s*%/);
+  const initialStop = text.match(/(?:硬止损|初始止损|止损距离)\s*(\d+(?:\.\d+)?)\s*%/);
   if (risk) next.riskPct = Number(risk[1]);
   if (leverage) next.leverage = Number(leverage[1]);
   if (volume) next.minVolumeRatio = Number(volume[1]);
   if (grid) next.gridStepPct = Number(grid[1]);
+  if (initialStop) next.initialStopPct = Number(initialStop[1]);
   validateRules(next);
   return next;
 }

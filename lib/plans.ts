@@ -8,7 +8,7 @@ export type PaperState = {
   exitReference: number | null;
 };
 
-export function startPaper(side: 'LONG' | 'SHORT', entry: number, initialStopPct = 10): PaperState {
+export function startPaper(side: 'LONG' | 'SHORT', entry: number, initialStopPct = 7): PaperState {
   return {
     stop: calculateStop(side, entry, entry, entry, undefined, initialStopPct),
     status: 'OPEN', marks: [0], exitReference: null,
@@ -16,7 +16,7 @@ export function startPaper(side: 'LONG' | 'SHORT', entry: number, initialStopPct
   };
 }
 
-export function advancePaper(state: PaperState, favorablePct: number, initialStopPct = 10): PaperState {
+export function advancePaper(state: PaperState, favorablePct: number, initialStopPct = 7): PaperState {
   if (!Number.isFinite(favorablePct) || favorablePct < -30 || favorablePct > 60) throw new Error('模拟变化必须在 −30% 到 +60%');
   if (state.status !== 'OPEN') return state;
   const { side, entry, extreme, stopPrice } = state.stop;

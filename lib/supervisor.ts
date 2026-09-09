@@ -69,7 +69,7 @@ export function startSupervisor(input: SupervisorInput, now = Date.now()): Super
   if (!validPrice(input.entryPrice) || !validPrice(input.currentStopPrice) ||
     !Number.isFinite(input.quantity) || input.quantity <= 0) throw new Error('真实持仓参数无效');
   const markPrice = input.markPrice ?? input.entryPrice;
-  const initialStopPct = input.initialStopPct ?? 10;
+  const initialStopPct = input.initialStopPct ?? 7;
   if (!validPrice(markPrice) || !Number.isFinite(initialStopPct) || initialStopPct <= 0 || initialStopPct >= 100) {
     throw new Error('监督任务价格或止损参数无效');
   }

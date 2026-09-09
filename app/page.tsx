@@ -60,7 +60,7 @@ import {
 } from '@/lib/supervisor';
 
 type Mode = 'demo' | 'live' | 'import';
-type Draft = { accountEquity: string; riskPct: string; leverage: string; gridStepPct: string };
+type Draft = { accountEquity: string; riskPct: string; leverage: string; initialStopPct: string; gridStepPct: string };
 type SupervisorDraft = {
   symbol: string;
   side: 'LONG' | 'SHORT';
@@ -69,8 +69,8 @@ type SupervisorDraft = {
   quantity: string;
   currentStopPrice: string;
 };
-const draftOf = (rules: Rules): Draft => ({ accountEquity: String(rules.accountEquity), riskPct: String(rules.riskPct), leverage: String(rules.leverage), gridStepPct: String(rules.gridStepPct) });
-const paperFor = (candidate?: Candidate, initialStop = 10) => candidate && (candidate.side === 'LONG' || candidate.side === 'SHORT') ? startPaper(candidate.side, candidate.price, initialStop) : null;
+const draftOf = (rules: Rules): Draft => ({ accountEquity: String(rules.accountEquity), riskPct: String(rules.riskPct), leverage: String(rules.leverage), initialStopPct: String(rules.initialStopPct), gridStepPct: String(rules.gridStepPct) });
+const paperFor = (candidate?: Candidate, initialStop = 7) => candidate && (candidate.side === 'LONG' || candidate.side === 'SHORT') ? startPaper(candidate.side, candidate.price, initialStop) : null;
 
 const price = (value: number) =>
   value.toLocaleString('en-US', { maximumFractionDigits: value < 1 ? 6 : 2 });
@@ -108,7 +108,7 @@ export default function Home() {
   const [draft, setDraft] = useState<Draft>(() => draftOf(defaults));
   const [rows, setRows] = useState<Candidate[]>(() => demoMarkets(defaults));
   const [selectedSymbol, setSelectedSymbol] = useState(rows[0]?.symbol ?? 'AVAXUSDT');
-  const [prompt, setPrompt] = useState('扫描 1 小时 U 本位永续，识别趋势多空与震荡；单笔风险 0.5%，3 倍杠杆，网格 3%。');
+  const [prompt, setPrompt] = useState('扫描 1 小时 U 本位永续，识别趋势多空与震荡；单笔风险 10%，硬止损 7%，3 倍杠杆，网格 3%。');
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: defaults.poolSize });
   const [error, setError] = useState('');
@@ -496,7 +496,7 @@ export default function Home() {
     setError('');
     setPlan(null);
     try {
-      const fromDraft = { ...rules, accountEquity: Number(draft.accountEquity), riskPct: Number(draft.riskPct), leverage: Number(draft.leverage), gridStepPct: Number(draft.gridStepPct) };
+      const fromDraft = { ...rules, accountEquity: Number(draft.accountEquity), riskPct: Number(draft.riskPct), leverage: Number(draft.leverage), initialStopPct: Number(draft.initialStopPct), gridStepPct: Number(draft.gridStepPct) };
       const nextRules = parseIntent(prompt, fromDraft);
       let next: Candidate[];
       if (target === 'demo') {
@@ -536,9 +536,9 @@ export default function Home() {
 
   function applyDraft() {
     try {
-      const next = parseIntent('', { ...rules, accountEquity: Number(draft.accountEquity), riskPct: Number(draft.riskPct), leverage: Number(draft.leverage), gridStepPct: Number(draft.gridStepPct) });
+      const next = parseIntent('', { ...rules, accountEquity: Number(draft.accountEquity), riskPct: Number(draft.riskPct), leverage: Number(draft.leverage), initialStopPct: Number(draft.initialStopPct), gridStepPct: Number(draft.gridStepPct) });
       setRules(next); setDraft(draftOf(next)); setPlan(null); setError('');
-      setPrompt(`扫描 ${next.interval} 趋势与震荡；单笔风险 ${next.riskPct}%，${next.leverage} 倍杠杆，网格 ${next.gridStepPct}%。`);
+      setPrompt(`扫描 ${next.interval} 趋势与震荡；单笔风险 ${next.riskPct}%，硬止损 ${next.initialStopPct}%，${next.leverage} 倍杠杆，网格 ${next.gridStepPct}%。`);
     } catch (cause) { setError((cause as Error).message); }
   }
 
@@ -599,7 +599,7 @@ export default function Home() {
           {running ? <RefreshCw className="spin" /> : <Radar />}{running ? `${progress.done}/${progress.total}` : '运行扫描'}
         </Button>
       </section>
-      <div className="command-help">规则解析器支持周期、风险、杠杆、量比和格距；未接入大模型。修改文字后需重新扫描。<Button variant="ghost" size="sm" disabled={running || draftChanged || autopilot?.status === 'RUNNING'} onClick={() => importInput.current?.click()}>导入 Agent 行情 JSON</Button><Input ref={importInput} className="hidden" type="file" accept="application/json,.json" aria-label="导入Agent原始行情" onChange={(event) => void uploadEvidence(event.target.files?.[0])} /></div>
+      <div className="command-help">规则解析器支持周期、账户风险、硬止损、杠杆、量比和格距；未接入大模型。修改文字后需重新扫描。<Button variant="ghost" size="sm" disabled={running || draftChanged || autopilot?.status === 'RUNNING'} onClick={() => importInput.current?.click()}>导入 Agent 行情 JSON</Button><Input ref={importInput} className="hidden" type="file" accept="application/json,.json" aria-label="导入Agent原始行情" onChange={(event) => void uploadEvidence(event.target.files?.[0])} /></div>
       {error && <div className="error-banner" role="alert"><X />{error}</div>}
       <div className="source-banner"><span className={source === 'SYNTHETIC' ? 'demo-source' : 'live-source'}>{source}</span><span>{stamp}</span><span>{stale ? '证据已失效 · 禁止生成计划' : source === 'SYNTHETIC' ? '合成行情 · 非回测 · 非实时信号' : '行情快照 · 两分钟后失效'}</span></div>
 
@@ -608,7 +608,7 @@ export default function Home() {
         <div><ArrowUpRight /><span>趋势做多</span><strong>{String(counts.long).padStart(2, '0')}</strong><small>满足硬条件</small></div>
         <div><ArrowDownRight /><span>趋势做空</span><strong>{String(counts.short).padStart(2, '0')}</strong><small>满足硬条件</small></div>
         <div><Waves /><span>震荡候选</span><strong>{String(counts.range).padStart(2, '0')}</strong><small>仅生成网格计划</small></div>
-        <div className="risk-ok"><ShieldCheck /><span>单笔预算</span><strong>{rules.riskPct.toFixed(2)}%</strong><small>风险预算 {risk.maxLoss.toFixed(0)} U</small></div>
+        <div className={`risk-ok ${rules.riskPct >= 5 ? 'high-risk' : ''}`}><ShieldCheck /><span>{rules.riskPct >= 5 ? '高风险预算' : '单笔预算'}</span><strong>{rules.riskPct.toFixed(2)}%</strong><small>风险预算 {risk.maxLoss.toFixed(0)} U</small></div>
       </section>
 
       <section className="autopilot-panel panel" aria-label="自动化试运行">
@@ -716,8 +716,9 @@ export default function Home() {
           </div>
           <div className="rule-controls">
             <label htmlFor="equity">假设权益 U<Input disabled={running || autopilot?.status === 'RUNNING'} id="equity" type="number" value={draft.accountEquity} min={1} onChange={(event) => updateRule('accountEquity', event.target.value)} /></label>
-            <label htmlFor="risk-percent">单笔风险 %<Input disabled={running || autopilot?.status === 'RUNNING'} id="risk-percent" type="number" value={draft.riskPct} min={0.05} max={5} step={0.05} onChange={(event) => updateRule('riskPct', event.target.value)} /></label>
+            <label htmlFor="risk-percent">单笔账户风险 %<Input disabled={running || autopilot?.status === 'RUNNING'} id="risk-percent" type="number" value={draft.riskPct} min={0.05} max={10} step={0.05} onChange={(event) => updateRule('riskPct', event.target.value)} /></label>
             <label htmlFor="leverage">杠杆（上限 3）<Input disabled={running || autopilot?.status === 'RUNNING'} id="leverage" type="number" value={draft.leverage} min={1} max={3} onChange={(event) => updateRule('leverage', event.target.value)} /></label>
+            <label htmlFor="initial-stop">初始硬止损 %<Input disabled={running || autopilot?.status === 'RUNNING'} id="initial-stop" type="number" value={draft.initialStopPct} min={1} max={30} step={0.5} onChange={(event) => updateRule('initialStopPct', event.target.value)} /></label>
             <label htmlFor="grid-step">网格间距 %<Input disabled={running || autopilot?.status === 'RUNNING'} id="grid-step" type="number" value={draft.gridStepPct} min={0.2} max={10} step={0.1} onChange={(event) => updateRule('gridStepPct', event.target.value)} /></label>
             <Button className="apply-rules" variant="secondary" disabled={running || autopilot?.status === 'RUNNING' || !draftChanged} onClick={applyDraft}>{draftChanged ? '应用参数' : '参数已应用'}</Button>
           </div>
@@ -777,7 +778,7 @@ export default function Home() {
               <div><span>估算保证金</span><strong>{selected?.side === 'RANGE' ? plan?.kind === 'LONG_GRID_PLAN' ? plan.margin?.toFixed(2) : '生成后计算' : selected?.side === 'NO_TRADE' ? '—' : risk.margin.toFixed(2)} U</strong></div><div><span>费用/滑点预留</span><strong>名义仓位 0.2%</strong></div>
             </div>
             <Button className="plan-button" onClick={() => { try { stagePlan(); } catch (cause) { setError((cause as Error).message); } }} disabled={!selected || selected.side === 'NO_TRADE' || running || stale || draftChanged}><Bot />{plan ? '计划草稿已生成' : '生成交易计划草稿'}<ChevronRight /></Button>
-            <p className="confirm-note"><LockKeyhole /> 预算含 0.2% 示例成本预留，不含未知资金费与极端滑点；实际亏损可能超预算，杠杆仍有强平风险。无下单功能。</p>
+            <p className="confirm-note"><LockKeyhole /> 当前默认单笔风险为账户权益 10%，属于激进设置。预算含 0.2% 示例成本预留，不含资金费、跳空与极端滑点；实际亏损仍可能超过预算。无下单功能。</p>
             {plan && <details className="plan-details"><summary>{plan.kind} · DRAFT ONLY</summary><pre>{JSON.stringify(plan, null, 2)}</pre></details>}
           </section>
         </aside>

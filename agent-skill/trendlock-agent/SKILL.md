@@ -26,7 +26,7 @@ Read [references/result-contract.md](references/result-contract.md) before colle
 ## Non-obvious invariants
 
 - Signal percentages are based on underlying price versus weighted entry, never leveraged ROE.
-- A trend stop only tightens. Initial −10%; at +5% lock +2%; at +8% lock +5%; then +11% locks +8%, +14% locks +11%, and so on. Mirror for shorts.
+- A trend stop only tightens. Initial −7%; at +5% lock +2%; at +8% lock +5%; then +11% locks +8%, +14% locks +11%, and so on. Mirror for shorts. The default per-trade account risk budget is 10%, an intentionally aggressive user-selected setting rather than a loss guarantee.
 - Price crossing the old stop closes the simulated state before any new ladder advance; a closed state never reopens itself.
 - A losing trend position never becomes a grid. A range plan is a fresh, separately risk-sized long-grid draft with a hard exit.
 - Fresh non-synthetic evidence expires after two minutes. Missing, discontinuous, malformed, or open-candle-only evidence must be rejected.

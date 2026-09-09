@@ -12,21 +12,21 @@ const near = (actual: number, expected: number) => assert.ok(Math.abs(actual - e
 void test('risk sizing depends on account risk and stop distance, not leverage', () => {
   const base = calculateRisk(defaults, 100);
   const lowerLeverage = calculateRisk({ ...defaults, leverage: 1 }, 100);
-  assert.equal(base.maxLoss, 50);
-  near(base.notional, 50 / .102);
+  assert.equal(base.maxLoss, 1_000);
+  near(base.notional, 1_000 / .072);
   assert.equal(lowerLeverage.notional, base.notional);
   near(lowerLeverage.margin, base.margin * 3);
-  near(base.stopLoss + base.costReserve, 50);
+  near(base.stopLoss + base.costReserve, 1_000);
 });
 
 void test('long staged stop locks profit at 5 and 8 percent', () => {
-  assert.equal(calculateStop('LONG', 100, 104, 104).stopPrice, 90);
+  assert.equal(calculateStop('LONG', 100, 104, 104).stopPrice, 93);
   assert.equal(calculateStop('LONG', 100, 104, 105).stopPrice, 102);
   assert.equal(calculateStop('LONG', 100, 107, 108).stopPrice, 105);
 });
 
 void test('short staged stop mirrors long behavior', () => {
-  assert.equal(calculateStop('SHORT', 100, 96, 96).stopPrice, 110.00000000000001);
+  assert.equal(calculateStop('SHORT', 100, 96, 96).stopPrice, 107);
   assert.equal(calculateStop('SHORT', 100, 96, 95).stopPrice, 98);
   assert.equal(calculateStop('SHORT', 100, 93, 92).stopPrice, 95);
 });
@@ -37,10 +37,11 @@ void test('stop never loosens after it has tightened', () => {
 });
 
 void test('intent parser extracts interval, risk, leverage and grid step', () => {
-  const parsed = parseIntent('扫描 4 小时趋势，单笔风险 0.25%，2 倍杠杆，网格 2.5%', defaults);
+  const parsed = parseIntent('扫描 4 小时趋势，单笔风险 0.25%，硬止损 7%，2 倍杠杆，网格 2.5%', defaults);
   assert.equal(parsed.interval, '4h');
   assert.equal(parsed.riskPct, 0.25);
   assert.equal(parsed.leverage, 2);
+  assert.equal(parsed.initialStopPct, 7);
   assert.equal(parsed.gridStepPct, 2.5);
 });
 
@@ -80,11 +81,12 @@ void test('initial gap through stop exits at observation, not a guaranteed trigg
   const state = advancePaper(startPaper('LONG', 100), -12);
   assert.equal(state.status, 'STOP_TRIGGERED');
   assert.equal(state.exitReference, 88);
-  assert.equal(state.stop.stopPrice, 90);
+  assert.equal(state.stop.stopPrice, 93);
 });
 
 void test('invalid inputs fail before changing state', () => {
   for (const accountEquity of [0, -1, NaN, Infinity]) assert.throws(() => calculateRisk({ ...defaults, accountEquity }, 100));
+  assert.throws(() => calculateRisk({ ...defaults, riskPct: 10.01 }, 100));
   assert.throws(() => calculateRisk({ ...defaults, leverage: 4 }, 100));
   assert.throws(() => calculateStop('LONG', 0, 100));
   assert.throws(() => advancePaper(startPaper('LONG', 100), NaN));
@@ -133,7 +135,7 @@ void test('grid uses all possible fills and hard stop in its own risk sizing', (
   assert.ok(plan.orders && plan.grid);
   const actual = plan.orders.reduce((sum, order) => sum + order.quantity * (order.limitPrice - plan.grid!.lowerHardStop) + order.quantity * order.limitPrice * .002, 0);
   near(actual, plan.estimatedLossAtStopWithReserve!);
-  assert.ok(actual <= 50 + 1e-8);
+  assert.ok(actual <= defaults.accountEquity * defaults.riskPct / 100 + 1e-8);
   assert.equal(plan.status, 'DRAFT_ONLY');
 });
 
@@ -188,12 +190,12 @@ void test('short paper autopilot uses underlying price movement, not leveraged R
 
 void test('paper autopilot preserves a configured initial stop distance', () => {
   const candidate = demoMarkets(defaults).find((row) => row.side === 'LONG')!;
-  let state = startAutopilot(candidate, { ...defaults, initialStopPct: 7 }, 1_000);
+  let state = startAutopilot(candidate, { ...defaults, initialStopPct: 6 }, 1_000);
   assert.equal(state.kind, 'TREND');
-  near(state.paper.stop.stopReturnPct, -7);
+  near(state.paper.stop.stopReturnPct, -6);
   state = applyAutopilotTick(state, candidate.price * 1.02, 2_000);
   assert.equal(state.kind, 'TREND');
-  near(state.paper.stop.stopReturnPct, -7);
+  near(state.paper.stop.stopReturnPct, -6);
 });
 
 void test('grid paper autopilot fills a crossed level, sells the rebound and tracks pnl', () => {
