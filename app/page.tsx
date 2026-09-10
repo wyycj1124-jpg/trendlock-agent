@@ -69,9 +69,10 @@ type SupervisorDraft = {
   entryPrice: string;
   quantity: string;
   currentStopPrice: string;
+  atrPct: string;
 };
 const draftOf = (rules: Rules): Draft => ({ accountEquity: String(rules.accountEquity), riskPct: String(rules.riskPct), leverage: String(rules.leverage), initialStopPct: String(rules.initialStopPct), gridStepPct: String(rules.gridStepPct) });
-const paperFor = (candidate?: Candidate, initialStop = 7) => candidate && (candidate.side === 'LONG' || candidate.side === 'SHORT') ? startPaper(candidate.side, candidate.price, initialStop) : null;
+const paperFor = (candidate?: Candidate, initialStop = 7) => candidate && (candidate.side === 'LONG' || candidate.side === 'SHORT') ? startPaper(candidate.side, candidate.price, initialStop, candidate.atrPct) : null;
 
 const price = (value: number) =>
   value.toLocaleString('en-US', { maximumFractionDigits: value < 1 ? 6 : 2 });
@@ -131,6 +132,7 @@ export default function Home() {
     entryPrice: '',
     quantity: '',
     currentStopPrice: '',
+    atrPct: '',
   });
   const [supervisorReady, setSupervisorReady] = useState(false);
   const [supervisorStarting, setSupervisorStarting] = useState(false);
@@ -351,6 +353,7 @@ export default function Home() {
       entryPrice: String(selected.price),
       quantity: String(Number(risk.quantity.toPrecision(8))),
       currentStopPrice: String(Number(stopPrice.toPrecision(8))),
+      atrPct: String(Number(selected.atrPct.toFixed(4))),
     });
     setError('');
   }
@@ -370,6 +373,7 @@ export default function Home() {
         currentStopPrice: Number(supervisorDraft.currentStopPrice),
         markPrice: quote.markPrice,
         initialStopPct: rules.initialStopPct,
+        atrPct: Number(supervisorDraft.atrPct),
       }, quote.time);
       flushSync(() => {
         setSupervisor(next);
@@ -714,7 +718,7 @@ export default function Home() {
             <div><span>模拟成交均价</span><strong>{autopilot?.kind === 'TREND' ? price(autopilot.entryPrice) : autopilot ? '分层限价' : '—'}</strong></div>
             <div><span>当前标记价格</span><strong>{autopilot ? price(autopilot.markPrice) : '—'}</strong></div>
             <div><span>{autopilot?.kind === 'GRID' ? '已买入格数' : '当前保护价'}</span><strong>{autopilot?.kind === 'GRID' ? `${autoInventory} 格` : autoProtection ? price(autoProtection.stopPrice) : '—'}</strong></div>
-            <div><span>{autopilot?.kind === 'GRID' ? '已实现损益' : '下一触发档'}</span><strong>{autopilot?.kind === 'GRID' ? `${autopilot.realizedPnl.toFixed(2)} U` : autoProtection?.nextTriggerPct ? `+${autoProtection.nextTriggerPct}%` : '—'}</strong></div>
+            <div><span>{autopilot?.kind === 'GRID' ? '已实现损益' : '保护模式'}</span><strong>{autopilot?.kind === 'GRID' ? `${autopilot.realizedPnl.toFixed(2)} U` : autoProtection?.trailingGapPct ? `ATR追踪 ${autoProtection.trailingGapPct.toFixed(1)}%` : autoProtection?.nextTriggerPct ? `下一档 +${autoProtection.nextTriggerPct}%` : '—'}</strong></div>
             <div><span>浮动损益</span><strong className={autoUnrealized >= 0 ? 'positive' : 'negative'}>{autoUnrealized >= 0 ? '+' : ''}{autoUnrealized.toFixed(2)} U</strong></div>
             <div><span>行情读取失败</span><strong>{quoteFailures}/3</strong></div>
           </div>
@@ -736,7 +740,7 @@ export default function Home() {
         <div className="supervisor-intro">
           <div>
             <strong>成交后只盯持仓交易对，不重扫整个市场</strong>
-            <p>每 5 秒读取公开标记价格；达到 +5%、+8% 及后续每 +3% 档位时，暂停在待确认状态并生成 MCP 改单指令。页面不持有账户授权，也不会自行下单。</p>
+            <p>每 5 秒读取公开标记价格；+5%、+8%、+11% 分档锁盈，+15% 后按 1 小时 ATR 使用 5%–8% 宽幅追踪。触发时生成 MCP 改单指令，页面不会自行下单。</p>
           </div>
           <Button variant="secondary" onClick={() => { try { prefillSupervisor(); } catch (cause) { setError((cause as Error).message); } }} disabled={supervisorActive}>用当前计划预填</Button>
         </div>
@@ -747,6 +751,7 @@ export default function Home() {
           <label htmlFor="supervisor-entry">真实加权开仓均价<Input id="supervisor-entry" type="number" min="0" step="any" value={supervisorDraft.entryPrice} disabled={supervisorActive || supervisorStarting} onChange={(event) => updateSupervisorDraft('entryPrice', event.target.value)} /></label>
           <label htmlFor="supervisor-quantity">真实持仓数量<Input id="supervisor-quantity" type="number" min="0" step="any" value={supervisorDraft.quantity} disabled={supervisorActive || supervisorStarting} onChange={(event) => updateSupervisorDraft('quantity', event.target.value)} /></label>
           <label htmlFor="supervisor-stop">币安现有服务器止损<Input id="supervisor-stop" type="number" min="0" step="any" value={supervisorDraft.currentStopPrice} disabled={supervisorActive || supervisorStarting} onChange={(event) => updateSupervisorDraft('currentStopPrice', event.target.value)} /></label>
+          <label htmlFor="supervisor-atr">1小时 ATR %<Input id="supervisor-atr" type="number" min="0" step="0.01" value={supervisorDraft.atrPct} disabled={supervisorActive || supervisorStarting} onChange={(event) => updateSupervisorDraft('atrPct', event.target.value)} /></label>
         </div>
         <div className="supervisor-actions">
           <Button onClick={() => void startLiveSupervisor().catch((cause) => setError((cause as Error).message))} disabled={supervisorActive || supervisorStarting}><Play />{supervisorStarting ? '读取标记价格…' : '开始监督监控'}</Button>
@@ -759,7 +764,7 @@ export default function Home() {
             <div><span>相对均价有利变化</span><strong className={(supervisorMovePct ?? 0) >= 0 ? 'positive' : 'negative'}>{supervisorMovePct === null ? '—' : `${supervisorMovePct >= 0 ? '+' : ''}${supervisorMovePct.toFixed(2)}%`}</strong></div>
             <div><span>已核验服务器止损</span><strong>{supervisor ? price(supervisor.currentStopPrice) : '—'}</strong></div>
             <div><span>当前锁定目标</span><strong>{supervisor ? `${supervisor.currentStopReturnPct >= 0 ? '+' : ''}${supervisor.currentStopReturnPct.toFixed(2)}%` : '—'}</strong></div>
-            <div><span>下一触发档</span><strong>{supervisor?.nextTriggerPct ? `+${supervisor.nextTriggerPct}%` : '—'}</strong></div>
+            <div><span>保护模式</span><strong>{supervisor?.nextTriggerPct ? `下一档 +${supervisor.nextTriggerPct}%` : supervisor?.atrPct !== undefined ? `ATR追踪 ${Math.min(8, Math.max(5, supervisor.atrPct * 1.5)).toFixed(1)}%` : '—'}</strong></div>
             <div><span>行情读取失败</span><strong>{supervisorQuoteFailures}/3</strong></div>
           </div>
           <div className="supervisor-log">
@@ -833,14 +838,15 @@ export default function Home() {
               <>
                 <div className="stop-hero"><span>{paper?.status === 'STOP_TRIGGERED' ? '已触发模拟平仓' : '模拟保护价 · 尚未挂单'}</span><strong>{price(stop.stopPrice)}</strong><em>保护目标 {stop.stopReturnPct >= 0 ? '+' : ''}{stop.stopReturnPct.toFixed(2)}%</em></div>
                 <p className="sandbox-note">假设均价 {price(entry)} · 模拟价 {price(stop.mark)} · 当前有利变化 {scenarioPct.toFixed(2)}%</p>
-                <div className="simulation-controls"><span>推进模拟价格</span>{[3, 5, 8, 12].map((value) => <button disabled={paper?.status !== 'OPEN'} key={value} className={Math.abs(scenarioPct - value) < .001 ? 'active' : ''} onClick={() => simulate(value)}>+{value}%</button>)}</div>
+                <div className="simulation-controls"><span>推进模拟价格</span>{[3, 5, 8, 11, 15, 20].map((value) => <button disabled={paper?.status !== 'OPEN'} key={value} className={Math.abs(scenarioPct - value) < .001 ? 'active' : ''} onClick={() => simulate(value)}>+{value}%</button>)}</div>
                 <div className="sandbox-actions"><Button variant="secondary" size="sm" disabled={paper?.status !== 'OPEN'} onClick={() => simulate(stop.stopReturnPct)}>回撤到保护价</Button><Button variant="ghost" size="sm" onClick={() => setPaper(paperFor(selected, rules.initialStopPct))}>重置模拟</Button></div>
                 <div className="ladder">
                   {[
                     ['初始保护', `目标 −${rules.initialStopPct}%`, entry * (1 + (trendSide === 'LONG' ? -1 : 1) * rules.initialStopPct / 100), 0],
                     ['盈利达到 +5%', '止损提高至 +2%', entry * (trendSide === 'LONG' ? 1.02 : .98), 1],
                     ['盈利达到 +8%', '止损提高至 +5%', entry * (trendSide === 'LONG' ? 1.05 : .95), 2],
-                    ['后续每 +3% 升一档', '+11% → +8%，+14% → +11%', entry * (trendSide === 'LONG' ? 1.08 : .92), 3],
+                    ['盈利达到 +11%', '止损提高至 +8%', entry * (trendSide === 'LONG' ? 1.08 : .92), 3],
+                    ['盈利达到 +15%', `锁定至少 +10%；ATR回撤带 ${Math.min(8, Math.max(5, (selected?.atrPct ?? 0) * 1.5)).toFixed(1)}%`, stop.stage === 4 ? stop.stopPrice : entry * (trendSide === 'LONG' ? 1.1 : .9), 4],
                   ].map(([title, subtitle, stopPrice, stage], index) => (
                     <div key={String(title)} className={`ladder-step ${stop.stage > Number(stage) ? 'done' : ''} ${stop.stage === Number(stage) ? 'active' : ''}`}>
                       <i>{stop.stage > Number(stage) ? <Check /> : index ? String(index + 1).padStart(2, '0') : '01'}</i><p><strong>{title}</strong><span>{subtitle}</span></p><b>{price(Number(stopPrice))}</b>

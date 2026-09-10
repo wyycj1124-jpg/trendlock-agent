@@ -36,6 +36,7 @@ export type SupervisorState = {
   markPrice: number;
   extremePrice: number;
   initialStopPct: number;
+  atrPct: number;
   nextTriggerPct: number | null;
   startedAt: number;
   lastTickAt: number;
@@ -52,6 +53,7 @@ export type SupervisorInput = {
   currentStopPrice: number;
   markPrice?: number;
   initialStopPct?: number;
+  atrPct?: number;
 };
 
 const validPrice = (value: number) => Number.isFinite(value) && value > 0;
@@ -70,7 +72,9 @@ export function startSupervisor(input: SupervisorInput, now = Date.now()): Super
     !Number.isFinite(input.quantity) || input.quantity <= 0) throw new Error('真实持仓参数无效');
   const markPrice = input.markPrice ?? input.entryPrice;
   const initialStopPct = input.initialStopPct ?? 7;
-  if (!validPrice(markPrice) || !Number.isFinite(initialStopPct) || initialStopPct <= 0 || initialStopPct >= 100) {
+  const atrPct = input.atrPct ?? 0;
+  if (!validPrice(markPrice) || !Number.isFinite(initialStopPct) || initialStopPct <= 0 || initialStopPct >= 100 ||
+    !Number.isFinite(atrPct) || atrPct < 0) {
     throw new Error('监督任务价格或止损参数无效');
   }
   if (crossed(input.side, markPrice, input.currentStopPrice)) {
@@ -87,6 +91,7 @@ export function startSupervisor(input: SupervisorInput, now = Date.now()): Super
     markPrice,
     input.currentStopPrice,
     initialStopPct,
+    atrPct,
   );
   return {
     schema: 'trendlock.supervisor/v1',
@@ -101,6 +106,7 @@ export function startSupervisor(input: SupervisorInput, now = Date.now()): Super
     markPrice,
     extremePrice: calculated.extreme,
     initialStopPct,
+    atrPct,
     nextTriggerPct: calculated.nextTriggerPct,
     startedAt: now,
     lastTickAt: now,
@@ -147,7 +153,20 @@ export function observeSupervisor(state: SupervisorState, markPrice: number, at 
     extremePrice,
     state.currentStopPrice,
     state.initialStopPct,
+    state.atrPct ?? 0,
   );
+  if (tighter(state.side, desired.stopPrice, state.currentStopPrice) && crossed(state.side, markPrice, desired.stopPrice)) {
+    return {
+      ...state,
+      status: 'RECONCILIATION_REQUIRED',
+      markPrice,
+      extremePrice,
+      nextTriggerPct: desired.nextTriggerPct,
+      lastTickAt: at,
+      pendingAction: null,
+      events: events(state, `行情曾触发更紧保护 ${desired.stopPrice}，但当前价格 ${markPrice} 已越过该目标；禁止补挂失效止损，必须读取真实账户并决定是否退出`),
+    };
+  }
   if (!tighter(state.side, desired.stopPrice, state.currentStopPrice)) {
     return {
       ...state,
@@ -279,6 +298,7 @@ export function buildMcpReplacementPrompt(state: SupervisorState) {
     `当前服务器止损：${action.previousTriggerPrice}`,
     `请求的新止损触发价：${action.requestedTriggerPrice}`,
     `触发依据：相对真实加权开仓均价锁定 ${action.requestedLockPct.toFixed(2)}%，使用 MARK_PRICE。`,
+    `1小时 ATR：${(state.atrPct ?? 0).toFixed(2)}%；+15% 后的追踪回撤带宽：${Math.min(8, Math.max(5, (state.atrPct ?? 0) * 1.5)).toFixed(2)}%。`,
     '执行前必须读取真实持仓、持仓模式、当前保护单、交易规则和数量；任一不一致就停止。',
     '请先向我展示将要提交的新全仓位保护单参数并等待确认。确认后先创建更紧的新保护单并读回验证，再单独请求确认是否取消旧保护单；任何一步含糊都进入对账，禁止盲目重试。',
   ].join('\n');

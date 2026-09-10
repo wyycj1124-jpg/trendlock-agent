@@ -60,9 +60,10 @@ export type StopState = {
   mark: number;
   extreme: number;
   favorablePct: number;
-  stage: 0 | 1 | 2 | 3;
+  stage: 0 | 1 | 2 | 3 | 4;
   stopPrice: number;
   stopReturnPct: number;
+  trailingGapPct: number | null;
   nextTriggerPct: number | null;
   triggered: boolean;
 };
@@ -265,17 +266,20 @@ export function calculateStop(
   extreme = mark,
   previousStop?: number,
   initialStopPct = 7,
+  atrPct = 0,
 ): StopState {
   if (![entry, mark, extreme].every((value) => Number.isFinite(value) && value > 0)) {
     throw new Error('止损计算价格无效');
   }
   if (!['LONG', 'SHORT'].includes(side) || !Number.isFinite(initialStopPct) || initialStopPct <= 0 || initialStopPct >= 100 ||
+    !Number.isFinite(atrPct) || atrPct < 0 ||
     (previousStop !== undefined && (!Number.isFinite(previousStop) || previousStop <= 0))) throw new Error('止损参数无效');
   extreme = side === 'LONG' ? Math.max(entry, mark, extreme) : Math.min(entry, mark, extreme);
   const favorablePct = side === 'LONG' ? ((mark / entry) - 1) * 100 : (1 - mark / entry) * 100;
   const extremeFavorablePct = side === 'LONG' ? ((extreme / entry) - 1) * 100 : (1 - extreme / entry) * 100;
   let stage: StopState['stage'] = 0;
   let rawStop = side === 'LONG' ? entry * (1 - initialStopPct / 100) : entry * (1 + initialStopPct / 100);
+  let trailingGapPct: number | null = null;
   let nextTriggerPct: number | null = 5;
   if (extremeFavorablePct >= 5 - 1e-9) {
     stage = 1;
@@ -289,9 +293,16 @@ export function calculateStop(
   }
   if (extremeFavorablePct >= 11 - 1e-9) {
     stage = 3;
-    const lockPct = 2 + Math.floor((extremeFavorablePct - 5 + 1e-9) / 3) * 3;
+    const lockPct = 8;
     rawStop = entry * (1 + (side === 'LONG' ? lockPct : -lockPct) / 100);
-    nextTriggerPct = lockPct + 6;
+    nextTriggerPct = 15;
+  }
+  if (extremeFavorablePct >= 15 - 1e-9) {
+    stage = 4;
+    trailingGapPct = Math.min(8, Math.max(5, atrPct * 1.5));
+    const lockPct = Math.max(10, extremeFavorablePct - trailingGapPct);
+    rawStop = entry * (1 + (side === 'LONG' ? lockPct : -lockPct) / 100);
+    nextTriggerPct = null;
   }
   const stopPrice = previousStop === undefined
     ? rawStop
@@ -305,6 +316,7 @@ export function calculateStop(
     stage,
     stopPrice,
     stopReturnPct: side === 'LONG' ? ((stopPrice / entry) - 1) * 100 : (1 - stopPrice / entry) * 100,
+    trailingGapPct,
     nextTriggerPct,
     triggered: side === 'LONG' ? mark <= stopPrice + entry * 1e-12 : mark >= stopPrice - entry * 1e-12,
   };

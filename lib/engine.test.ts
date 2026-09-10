@@ -53,14 +53,33 @@ void test('volume ratio is not interpreted as leverage', () => {
   assert.equal(parseIntent('量比 1.5 倍', defaults).leverage, defaults.leverage);
 });
 
-void test('later protection advances only at discrete three-point thresholds', () => {
-  for (const [move, locked, next] of [[10.9, 5, 11], [11, 8, 14], [12, 8, 14], [14, 11, 17], [17, 14, 20]]) {
+void test('protection uses fixed steps until 15 percent', () => {
+  for (const [move, locked, next] of [[10.9, 5, 11], [11, 8, 15], [12, 8, 15], [14, 8, 15]]) {
     for (const side of ['LONG', 'SHORT'] as const) {
       const mark = 100 * (1 + (side === 'LONG' ? move : -move) / 100);
       const state = calculateStop(side, 100, mark);
       near(state.stopReturnPct, locked);
       assert.equal(state.nextTriggerPct, next);
     }
+  }
+});
+
+void test('at 15 percent the stop switches to ATR trailing with a 5 to 8 percent gap and a 10 percent floor', () => {
+  for (const side of ['LONG', 'SHORT'] as const) {
+    const direction = side === 'LONG' ? 1 : -1;
+    const atFifteen = calculateStop(side, 100, 100 * (1 + direction * .15), undefined, undefined, 7, 2);
+    near(atFifteen.stopReturnPct, 10);
+    near(atFifteen.trailingGapPct!, 5);
+    assert.equal(atFifteen.nextTriggerPct, null);
+    assert.equal(atFifteen.stage, 4);
+
+    const mediumAtr = calculateStop(side, 100, 100 * (1 + direction * .20), undefined, undefined, 7, 4);
+    near(mediumAtr.stopReturnPct, 14);
+    near(mediumAtr.trailingGapPct!, 6);
+
+    const highAtr = calculateStop(side, 100, 100 * (1 + direction * .20), undefined, undefined, 7, 10);
+    near(highAtr.stopReturnPct, 12);
+    near(highAtr.trailingGapPct!, 8);
   }
 });
 
@@ -90,6 +109,7 @@ void test('invalid inputs fail before changing state', () => {
   assert.throws(() => calculateRisk({ ...defaults, riskPct: 10.01 }, 100));
   assert.throws(() => calculateRisk({ ...defaults, leverage: 4 }, 100));
   assert.throws(() => calculateStop('LONG', 0, 100));
+  assert.throws(() => calculateStop('LONG', 100, 100, 100, undefined, 7, NaN));
   assert.throws(() => advancePaper(startPaper('LONG', 100), NaN));
 });
 
@@ -318,6 +338,16 @@ void test('supervisor discards a pending replacement if price crosses it before 
   assert.equal(state.status, 'RECONCILIATION_REQUIRED');
   assert.equal(state.pendingAction, null);
   assert.equal(state.currentStopPrice, 90);
+});
+
+void test('supervisor never queues a retroactive ATR stop above a retraced long mark', () => {
+  let state = startSupervisor({ symbol: 'SOLUSDT', side: 'LONG', entryPrice: 100, quantity: 1, currentStopPrice: 108, markPrice: 109, atrPct: 2 }, 1_000);
+  state = { ...state, extremePrice: 115 };
+  state = observeSupervisor(state, 109, 2_000);
+  assert.equal(state.status, 'RECONCILIATION_REQUIRED');
+  assert.equal(state.pendingAction, null);
+  assert.equal(state.currentStopPrice, 108);
+  assert.match(state.events.at(-1)!, /禁止补挂失效止损/);
 });
 
 void test('crossing the recorded server stop forces account reconciliation', () => {

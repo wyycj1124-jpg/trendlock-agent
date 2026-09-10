@@ -2,15 +2,17 @@ import { calculateGrid, calculateRisk, calculateStop, validateRules, type Candid
 
 export type PaperState = {
   stop: StopState;
+  atrPct: number;
   status: 'OPEN' | 'STOP_TRIGGERED';
   marks: number[];
   events: string[];
   exitReference: number | null;
 };
 
-export function startPaper(side: 'LONG' | 'SHORT', entry: number, initialStopPct = 7): PaperState {
+export function startPaper(side: 'LONG' | 'SHORT', entry: number, initialStopPct = 7, atrPct = 0): PaperState {
   return {
-    stop: calculateStop(side, entry, entry, entry, undefined, initialStopPct),
+    stop: calculateStop(side, entry, entry, entry, undefined, initialStopPct, atrPct),
+    atrPct,
     status: 'OPEN', marks: [0], exitReference: null,
     events: [`模拟建仓：${side}，开仓基准 ${entry}；初始保护 −${initialStopPct}%`],
   };
@@ -29,7 +31,7 @@ export function advancePaper(state: PaperState, favorablePct: number, initialSto
     marks: [...state.marks, favorablePct],
     events: [...state.events, `价格触及/越过保护线，模拟平仓；观察价 ${mark}，触发价 ${stopPrice}，实际成交仍取决于滑点。`],
   };
-  const next = calculateStop(side, entry, mark, extreme, stopPrice, initialStopPct);
+  const next = calculateStop(side, entry, mark, extreme, stopPrice, initialStopPct, state.atrPct ?? 0);
   return {
     ...state, stop: next, marks: [...state.marks, favorablePct],
     events: [...state.events, next.stopPrice !== stopPrice
@@ -63,7 +65,7 @@ export function stageCandidate(candidate: Candidate, rules: Rules, source: strin
     kind: 'TREND_PLAN', status: 'DRAFT_ONLY', source,
     symbol: candidate.symbol, side: candidate.side,
     indicativeEntry: candidate.price, risk: calculateRisk(rules, candidate.price),
-    protection: calculateStop(candidate.side as 'LONG' | 'SHORT', candidate.price, candidate.price, candidate.price, undefined, rules.initialStopPct),
+    protection: calculateStop(candidate.side as 'LONG' | 'SHORT', candidate.price, candidate.price, candidate.price, undefined, rules.initialStopPct, candidate.atrPct),
     requirements: ['成交后改用真实加权均价', '核验强平价缓冲与实际持仓', '价格或数量尚未按交易所步长量化'],
   };
 }

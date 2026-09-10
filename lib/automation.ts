@@ -83,7 +83,7 @@ export function startAutopilot(candidate: Candidate, rules: Rules, now = Date.no
       lastTickAt: now,
       tickCount: 0,
       realizedPnl: 0,
-      paper: startPaper(candidate.side, candidate.price, rules.initialStopPct),
+      paper: startPaper(candidate.side, candidate.price, rules.initialStopPct, candidate.atrPct),
       events: [`PAPER 自动化启动：${candidate.symbol} ${candidate.side}，模拟成交均价 ${candidate.price}`],
     };
   }
