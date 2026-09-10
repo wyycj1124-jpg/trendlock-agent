@@ -54,6 +54,7 @@ export class BinanceFuturesGateway implements ExchangeGateway {
   private readonly secretKey;
   private clockOffsetMs = 0;
   private lastClockSyncAt = 0;
+  private clockSyncPromise: Promise<void> | undefined;
 
   constructor(config: RuntimeConfig) {
     if (config.mode === 'DRY_RUN')
@@ -71,16 +72,17 @@ export class BinanceFuturesGateway implements ExchangeGateway {
     path: string,
     params: Params = {},
     signed = false,
+    retryTimestamp = true,
   ): Promise<T> {
     if (signed && Date.now() - this.lastClockSyncAt > 300_000)
-      await this.syncClock();
+      await this.ensureClockFresh();
     const values = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined) values.set(key, String(value));
     }
     if (signed) {
       values.set('timestamp', String(Date.now() + this.clockOffsetMs));
-      values.set('recvWindow', '5000');
+      values.set('recvWindow', '15000');
       values.set(
         'signature',
         createHmac('sha256', this.secretKey)
@@ -122,6 +124,10 @@ export class BinanceFuturesGateway implements ExchangeGateway {
       const code = Number.isFinite(Number(data.code))
         ? Number(data.code)
         : undefined;
+      if (signed && code === -1021 && retryTimestamp) {
+        await this.ensureClockFresh(true);
+        return this.request(method, path, params, true, false);
+      }
       const message =
         response.status === 451
           ? '币安限制当前网络地区访问（HTTP 451）；请遵守平台所在地规则，程序不会尝试绕过'
@@ -137,8 +143,21 @@ export class BinanceFuturesGateway implements ExchangeGateway {
     return payload as T;
   }
 
+  private async ensureClockFresh(force = false) {
+    if (!force && Date.now() - this.lastClockSyncAt <= 300_000) return;
+    if (!this.clockSyncPromise) {
+      const pending = this.syncClock();
+      this.clockSyncPromise = pending;
+      const clear = () => {
+        if (this.clockSyncPromise === pending)
+          this.clockSyncPromise = undefined;
+      };
+      void pending.then(clear, clear);
+    }
+    await this.clockSyncPromise;
+  }
+
   private async syncClock() {
-    const started = Date.now();
     const payload = await this.request<{ serverTime: number }>(
       'GET',
       '/fapi/v1/time',
@@ -146,8 +165,9 @@ export class BinanceFuturesGateway implements ExchangeGateway {
     const finished = Date.now();
     if (!Number.isFinite(payload.serverTime))
       throw new Error('币安服务器时间无效');
-    this.clockOffsetMs =
-      payload.serverTime - Math.round((started + finished) / 2);
+    // Keep signed timestamps conservatively behind the last observed server time.
+    // Using the RTT midpoint can put a request >1s into the future on a slow link.
+    this.clockOffsetMs = payload.serverTime - finished;
     this.lastClockSyncAt = finished;
   }
 

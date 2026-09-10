@@ -184,3 +184,58 @@ void test('Binance V3 positions obtain leverage and margin type from symbolConfi
     globalThis.fetch = originalFetch;
   }
 });
+
+void test('Binance shares clock sync and retries timestamp rejection once', async () => {
+  const originalFetch = globalThis.fetch;
+  let timeRequests = 0;
+  let leverageRequests = 0;
+  try {
+    globalThis.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      if (url.includes('/fapi/v1/time')) {
+        timeRequests += 1;
+        return new Response(JSON.stringify({ serverTime: Date.now() }), {
+          status: 200,
+        });
+      }
+      if (url.includes('/fapi/v1/leverage')) {
+        leverageRequests += 1;
+        const body = new URLSearchParams(
+          typeof init?.body === 'string' ? init.body : '',
+        );
+        assert.equal(body.get('recvWindow'), '15000');
+        if (leverageRequests === 1) {
+          return new Response(
+            JSON.stringify({
+              code: -1021,
+              msg: 'Timestamp for this request is outside of the recvWindow.',
+            }),
+            { status: 400 },
+          );
+        }
+        return new Response(JSON.stringify({ leverage: 3 }), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({ code: -1, msg: 'unexpected test request' }),
+        { status: 400 },
+      );
+    };
+    const gateway = new BinanceFuturesGateway(
+      loadConfig({
+        TRENDLOCK_MODE: 'TESTNET',
+        BINANCE_API_KEY: 'test-key',
+        BINANCE_SECRET_KEY: 'test-secret',
+      }),
+    );
+    await gateway.setLeverage('ETHUSDT', 3);
+    assert.equal(leverageRequests, 2);
+    assert.equal(timeRequests, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
