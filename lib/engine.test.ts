@@ -313,12 +313,12 @@ void test('supervisor queues a stop replacement but never applies it before conf
   assert.equal(state.pendingAction?.requestedTriggerPrice, 102);
   const prompt = buildMcpReplacementPrompt(state);
   assert.match(prompt, /不要立即执行/);
-  assert.match(prompt, /先创建更紧的新保护单/);
+  assert.match(prompt, /EXECUTION_BLOCKED/);
+  assert.match(prompt, /不允许同时存在两张/);
   state = recordStopReplacement(state, 102, 3_000);
   assert.equal(state.status, 'MONITORING');
   assert.equal(state.currentStopPrice, 102);
 });
-
 void test('supervisor keeps the old server stop active while confirmation is pending', () => {
   let state = startSupervisor({ symbol: 'ETHUSDT', side: 'SHORT', positionSide: 'SHORT', entryPrice: 100, quantity: 1, currentStopPrice: 110 }, 1_000);
   state = observeSupervisor(state, 95, 2_000);

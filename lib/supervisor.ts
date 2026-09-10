@@ -300,6 +300,6 @@ export function buildMcpReplacementPrompt(state: SupervisorState) {
     `触发依据：相对真实加权开仓均价锁定 ${action.requestedLockPct.toFixed(2)}%，使用 MARK_PRICE。`,
     `1小时 ATR：${(state.atrPct ?? 0).toFixed(2)}%；+15% 后的追踪回撤带宽：${Math.min(8, Math.max(5, (state.atrPct ?? 0) * 1.5)).toFixed(2)}%。`,
     '执行前必须读取真实持仓、持仓模式、当前保护单、交易规则和数量；任一不一致就停止。',
-    '请先向我展示将要提交的新全仓位保护单参数并等待确认。确认后先创建更紧的新保护单并读回验证，再单独请求确认是否取消旧保护单；任何一步含糊都进入对账，禁止盲目重试。',
+    '币安同方向不允许同时存在两张 closePosition=true 保护，且条件单没有可用的原子改单接口。本人工监督页不得声称先建后撤；请返回 EXECUTION_BLOCKED，提示用户在币安官方界面改止损，或使用已明示 API 往返保护空窗且失败即平仓的本地守护进程。',
   ].join('\n');
 }

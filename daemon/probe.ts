@@ -186,7 +186,9 @@ export async function runTestnetProbe(
     if (position.markPrice <= tighterTrigger) {
       throw new Error('价格已越过收紧测试线，保留初始止损并停止改单测试');
     }
-    stage = `创建收紧止损（triggerPrice=${formatProbeNumber(tighterTrigger)} tickSize=${formatProbeNumber(rules.tickSize)}）`;
+    stage = '撤销初始止损（币安同方向只允许一张全仓位保护）';
+    await exchange.cancelProtectiveStop(initialProtection);
+    stage = `撤旧后立即创建收紧止损（triggerPrice=${formatProbeNumber(tighterTrigger)} tickSize=${formatProbeNumber(rules.tickSize)}）`;
     tighterProtection = await exchange.placeProtectiveStop({
       symbol,
       side: 'LONG',
@@ -194,19 +196,6 @@ export async function runTestnetProbe(
       triggerPrice: tighterTrigger,
       clientAlgoId: probeId(symbol, 'T'),
     });
-    const bothStops = await exchange.getOpenProtectiveStops(symbol);
-    if (
-      !bothStops.some(
-        (item) => item.clientAlgoId === initialProtection?.clientAlgoId,
-      ) ||
-      !bothStops.some(
-        (item) => item.clientAlgoId === tighterProtection?.clientAlgoId,
-      )
-    ) {
-      throw new Error('新旧保护未同时读回，拒绝撤销旧保护');
-    }
-    stage = '撤销旧止损';
-    await exchange.cancelProtectiveStop(initialProtection);
     const afterReplacement = await exchange.getOpenProtectiveStops(symbol);
     if (
       afterReplacement.some(
@@ -216,7 +205,7 @@ export async function runTestnetProbe(
         (item) => item.clientAlgoId === tighterProtection?.clientAlgoId,
       )
     ) {
-      throw new Error('先建后撤的最终保护状态不一致');
+      throw new Error('撤旧立即建新的最终保护状态不一致');
     }
 
     stage = '市价平掉测试仓位';

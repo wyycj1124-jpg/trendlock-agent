@@ -109,6 +109,28 @@ void test('protection failure emergency-closes the new position and halts', asyn
   }
 });
 
+void test('replacement protection failure closes the position instead of leaving it naked', async () => {
+  const context = await fixture();
+  try {
+    const trend = context.candidates.find(
+      (candidate) => candidate.side === 'LONG',
+    )!;
+    const managed = await context.core.openCandidate(trend, Date.now());
+    context.exchange.setMark(trend.symbol, managed.entryPrice * 1.052);
+    context.exchange.failNextProtection = true;
+    await context.core.monitorOnce();
+    assert.equal(context.core.state.status, 'HALTED');
+    assert.equal((await context.exchange.getPositions()).length, 0);
+    assert.equal(
+      (await context.exchange.getOpenProtectiveStops(trend.symbol)).length,
+      0,
+    );
+    assert.match(context.core.state.haltReason!, /旧保护已撤销但新保护/);
+  } finally {
+    await rm(context.directory, { recursive: true, force: true });
+  }
+});
+
 void test('restart never adopts unrelated positions and closes a managed naked position', async () => {
   const context = await fixture();
   try {

@@ -119,6 +119,24 @@ export class TrendLockCore {
         position,
         clientId(position.symbol, 'X'),
       );
+      const remaining = (
+        await this.exchange.getPositions(position.symbol)
+      ).find(
+        (item) =>
+          item.side === position.side &&
+          item.positionSide === position.positionSide,
+      );
+      if (remaining) throw new Error('紧急平仓后仍读到非零持仓');
+      const ownedStops = (
+        await this.exchange.getOpenProtectiveStops(position.symbol)
+      ).filter((order) => order.clientAlgoId.startsWith('TL'));
+      for (const stop of ownedStops)
+        await this.exchange.cancelProtectiveStop(stop);
+      const residualStops = (
+        await this.exchange.getOpenProtectiveStops(position.symbol)
+      ).filter((order) => order.clientAlgoId.startsWith('TL'));
+      if (residualStops.length)
+        throw new Error('紧急平仓后仍有 TrendLock 条件单');
       delete this.state.managed[position.symbol];
       this.state.pendingAction = null;
       await this.save();
@@ -599,37 +617,57 @@ export class TrendLockCore {
       return;
     }
     const previous = managed.protection;
-    let next: ProtectiveOrder;
+    try {
+      await this.exchange.cancelProtectiveStop(previous);
+    } catch (error) {
+      try {
+        const oldStillExists = (
+          await this.exchange.getOpenProtectiveStops(managed.symbol)
+        ).some((order) => order.algoId === previous.algoId);
+        if (oldStillExists) {
+          await this.store.audit(
+            'WARN',
+            'STOP_REPLACE_SKIPPED',
+            `旧保护撤销失败但服务器保护仍在，本轮不改单：${safeError(error)}`,
+            { symbol: managed.symbol },
+          );
+          return;
+        }
+      } catch {
+        // The result is uncertain; the emergency close below is fail-closed.
+      }
+      await this.emergencyClose(
+        position,
+        `旧保护撤销结果不确定且无法确认保护仍在：${safeError(error)}`,
+      );
+      return;
+    }
+
+    const nextClientAlgoId = clientId(managed.symbol, 'S');
+    let next: ProtectiveOrder | undefined;
     try {
       next = await this.exchange.placeProtectiveStop({
         symbol: managed.symbol,
         side: managed.side,
         positionSide: managed.positionSide,
         triggerPrice,
-        clientAlgoId: clientId(managed.symbol, 'S'),
+        clientAlgoId: nextClientAlgoId,
       });
     } catch (error) {
-      await this.store.audit(
-        'WARN',
-        'STOP_REPLACE_SKIPPED',
-        `新保护创建失败，旧保护保留：${safeError(error)}`,
-        { symbol: managed.symbol },
-      );
-      return;
-    }
-    managed.protection = next;
-    managed.stopStage = stage;
-    managed.updatedAt = Date.now();
-    await this.save();
-    try {
-      await this.exchange.cancelProtectiveStop(previous);
-    } catch (error) {
-      await this.store.audit(
-        'WARN',
-        'OLD_STOP_REMAINS',
-        `新保护已生效，但旧保护撤销失败：${safeError(error)}`,
-        { symbol: managed.symbol },
-      );
+      try {
+        next = (
+          await this.exchange.getOpenProtectiveStops(managed.symbol)
+        ).find((order) => order.clientAlgoId === nextClientAlgoId);
+      } catch {
+        // The emergency close below is safer than assuming protection exists.
+      }
+      if (!next) {
+        await this.emergencyClose(
+          position,
+          `旧保护已撤销但新保护创建/读回失败：${safeError(error)}`,
+        );
+        return;
+      }
     }
     let verified: ProtectiveOrder | undefined;
     try {
@@ -637,9 +675,9 @@ export class TrendLockCore {
         await this.exchange.getOpenProtectiveStops(managed.symbol)
       ).find((order) => order.clientAlgoId === next.clientAlgoId);
     } catch (error) {
-      await this.halt(
-        `新保护已确认、旧保护已处理，但最终读回失败：${safeError(error)}；服务器保护不撤销`,
-        managed.symbol,
+      await this.emergencyClose(
+        position,
+        `撤旧建新后最终保护读回失败：${safeError(error)}`,
       );
       return;
     }
@@ -648,11 +686,13 @@ export class TrendLockCore {
       return;
     }
     managed.protection = verified;
+    managed.stopStage = stage;
+    managed.updatedAt = Date.now();
     await this.save();
     await this.store.audit(
       'INFO',
       'STOP_REPLACED',
-      '先建后撤完成，服务器保护价已提高',
+      '按币安单保护限制撤旧后立即建新，服务器保护价已提高',
       {
         symbol: managed.symbol,
         data: {

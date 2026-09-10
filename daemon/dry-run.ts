@@ -153,6 +153,19 @@ export class DryRunGateway implements ExchangeGateway {
       this.failNextProtection = false;
       throw new Error('DRY_RUN 注入的保护单失败');
     }
+    if (
+      [...this.stops.values()].some(
+        (order) =>
+          order.symbol === request.symbol &&
+          order.positionSide === request.positionSide &&
+          order.side === (request.side === 'LONG' ? 'SELL' : 'BUY') &&
+          order.status === 'NEW',
+      )
+    ) {
+      throw new Error(
+        'DRY_RUN 模拟币安 -4130：同方向已存在 closePosition 保护单',
+      );
+    }
     const order: ProtectiveOrder = {
       symbol: request.symbol,
       algoId: String(++this.orderSequence),
