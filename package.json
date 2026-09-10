@@ -13,6 +13,7 @@
     "test": "node --test lib/engine.test.ts daemon/*.test.ts",
     "approval:scan": "node scripts/build-approval-queue.ts",
     "daemon:doctor": "node daemon/cli.ts doctor",
+    "daemon:probe": "node daemon/cli.ts probe",
     "daemon:smoke": "node daemon/cli.ts smoke",
     "daemon:once": "node daemon/cli.ts once",
     "daemon:start": "node daemon/cli.ts start",

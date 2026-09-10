@@ -20,6 +20,9 @@ function quantize(value: number, step: number, direction: 'FLOOR' | 'CEIL') {
 export const floorToStep = (value: number, step: number) =>
   quantize(value, step, 'FLOOR');
 
+export const ceilToStep = (value: number, step: number) =>
+  quantize(value, step, 'CEIL');
+
 export function quantizeStop(
   value: number,
   tickSize: number,

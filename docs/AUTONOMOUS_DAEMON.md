@@ -59,6 +59,16 @@ npm run daemon:once -- --force-scan
 
 先在 Demo/Testnet 检查：实际持仓方向、逐仓模式、3 倍杠杆、全仓位服务器止损、改单顺序和重启恢复都符合预期，再考虑实盘。测试网不可用或接口不支持新 Algo Order 时，核心会失败关闭。
 
+测试账户清空持仓与所有挂单后，可以运行一次受限闭环探针。它仅允许 `TESTNET`，默认用不超过 50 USDT 名义价值的 ETHUSDT 多单，验证真实成交读回、−7% 服务器保护、先建 −5% 新保护再撤旧保护、主动平仓和测试单清理：
+
+```bash
+export TRENDLOCK_TESTNET_PROBE_ACK='I_ACCEPT_TESTNET_ORDER_PROBE'
+npm run daemon:probe
+unset TRENDLOCK_TESTNET_PROBE_ACK
+```
+
+探针开始前要求账户完全无持仓、无普通挂单、无 Algo 单。任一步骤失败都会尝试只清理 `TLP` 标识的测试仓位和测试保护；若平仓无法确认，则保留服务器保护并要求人工核对。
+
 ## 第三步：实盘解锁
 
 实盘不应直接从 50 USDT 开始之前跳过测试网。确认账户、API 权限、IP 白名单和策略风险后，才在本机设置：

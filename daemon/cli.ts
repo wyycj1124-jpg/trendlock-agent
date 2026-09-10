@@ -7,6 +7,7 @@ import { TrendLockCore } from './core.ts';
 import { DryRunGateway } from './dry-run.ts';
 import { runCycle, runForever, runSyntheticCycle } from './service.ts';
 import { StateStore } from './store.ts';
+import { runTestnetProbe } from './probe.ts';
 
 const command = process.argv[2] ?? 'doctor';
 
@@ -82,6 +83,20 @@ async function main() {
     return;
   }
 
+  if (command === 'probe') {
+    const result = await runTestnetProbe(exchange, {
+      acknowledgement: process.env.TRENDLOCK_TESTNET_PROBE_ACK,
+      symbol: process.env.TRENDLOCK_PROBE_SYMBOL,
+      notional:
+        process.env.TRENDLOCK_PROBE_NOTIONAL === undefined
+          ? undefined
+          : Number(process.env.TRENDLOCK_PROBE_NOTIONAL),
+      leverage: config.leverage,
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
   if (command === 'resume') {
     if (process.env.TRENDLOCK_RESUME_ACK !== 'I_HAVE_RECONCILED_ACCOUNT') {
       throw new Error(
@@ -129,7 +144,7 @@ async function main() {
     return;
   }
   throw new Error(
-    `未知命令 ${command}；支持 doctor、smoke、once、start、report、resume`,
+    `未知命令 ${command}；支持 doctor、probe、smoke、once、start、report、resume`,
   );
 }
 
