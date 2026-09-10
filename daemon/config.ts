@@ -53,6 +53,15 @@ function symbolsEnv(value: string | undefined) {
   return symbols;
 }
 
+function credentialEnv(env: Environment, name: string) {
+  const value = env[name]?.trim();
+  if (!value) return undefined;
+  if (!/^[\x21-\x7e]+$/.test(value)) {
+    throw new Error(`${name} 只能包含可打印 ASCII 字符；请重新复制纯密钥内容`);
+  }
+  return value;
+}
+
 export function loadConfig(env: Environment = process.env): RuntimeConfig {
   const mode = (env.TRENDLOCK_MODE ?? 'DRY_RUN').toUpperCase() as RunMode;
   if (!['DRY_RUN', 'TESTNET', 'LIVE'].includes(mode)) {
@@ -76,8 +85,8 @@ export function loadConfig(env: Environment = process.env): RuntimeConfig {
   if (perSlotRiskPct * maxSlots > portfolioRiskPct + 1e-9) {
     throw new Error('单槽风险 × 槽位数不能超过组合风险上限');
   }
-  const apiKey = env.BINANCE_API_KEY?.trim();
-  const secretKey = env.BINANCE_SECRET_KEY?.trim();
+  const apiKey = credentialEnv(env, 'BINANCE_API_KEY');
+  const secretKey = credentialEnv(env, 'BINANCE_SECRET_KEY');
   if (mode !== 'DRY_RUN' && (!apiKey || !secretKey)) {
     throw new Error(
       `${mode} 模式需要本机 BINANCE_API_KEY 与 BINANCE_SECRET_KEY`,

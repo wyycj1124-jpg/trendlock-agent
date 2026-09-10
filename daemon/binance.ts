@@ -152,7 +152,10 @@ export class BinanceFuturesGateway implements ExchangeGateway {
     return Date.now() + this.clockOffsetMs;
   }
 
-  private parsePosition(row: Record<string, unknown>): ExchangePosition | null {
+  private parsePosition(
+    row: Record<string, unknown>,
+    configuration?: Record<string, unknown>,
+  ): ExchangePosition | null {
     const signedQuantity = Number(row.positionAmt);
     if (!Number.isFinite(signedQuantity) || signedQuantity === 0) return null;
     const ps = positionSide(row.positionSide);
@@ -169,9 +172,16 @@ export class BinanceFuturesGateway implements ExchangeGateway {
       entryPrice: number(row.entryPrice, 'entryPrice'),
       markPrice: number(row.markPrice, 'markPrice'),
       unrealizedPnl: Number(row.unRealizedProfit ?? row.unrealizedProfit ?? 0),
-      leverage: number(row.leverage, 'leverage'),
-      marginType: string(row.marginType, 'marginType'),
+      leverage: number(configuration?.leverage, 'leverage'),
+      marginType: string(configuration?.marginType, 'marginType'),
     };
+  }
+
+  private configurationMap(rows: Array<Record<string, unknown>>) {
+    if (!Array.isArray(rows)) throw new Error('币安交易对配置返回结构无效');
+    return new Map(
+      rows.map((row) => [string(row.symbol, 'symbolConfig.symbol'), row]),
+    );
   }
 
   private parseProtective(
@@ -199,17 +209,26 @@ export class BinanceFuturesGateway implements ExchangeGateway {
   }
 
   async getPositions(symbolFilter?: string) {
-    const rows = await this.request<Array<Record<string, unknown>>>(
-      'GET',
-      '/fapi/v3/positionRisk',
-      {
-        symbol: symbolFilter,
-      },
-      true,
-    );
+    const [rows, configurations] = await Promise.all([
+      this.request<Array<Record<string, unknown>>>(
+        'GET',
+        '/fapi/v3/positionRisk',
+        { symbol: symbolFilter },
+        true,
+      ),
+      this.request<Array<Record<string, unknown>>>(
+        'GET',
+        '/fapi/v1/symbolConfig',
+        { symbol: symbolFilter },
+        true,
+      ),
+    ]);
     if (!Array.isArray(rows)) throw new Error('币安持仓返回结构无效');
+    const configurationBySymbol = this.configurationMap(configurations);
     return rows
-      .map((row) => this.parsePosition(row))
+      .map((row) =>
+        this.parsePosition(row, configurationBySymbol.get(String(row.symbol))),
+      )
       .filter((row): row is ExchangePosition => row !== null);
   }
 
@@ -231,43 +250,58 @@ export class BinanceFuturesGateway implements ExchangeGateway {
 
   async getAccountSnapshot(): Promise<AccountSnapshot> {
     await this.syncClock();
-    const [balances, positions, openOrders, algoOrders, account] =
-      await Promise.all([
-        this.request<Array<Record<string, unknown>>>(
-          'GET',
-          '/fapi/v3/balance',
-          {},
-          true,
-        ),
-        this.request<Array<Record<string, unknown>>>(
-          'GET',
-          '/fapi/v3/positionRisk',
-          {},
-          true,
-        ),
-        this.request<Array<Record<string, unknown>>>(
-          'GET',
-          '/fapi/v1/openOrders',
-          {},
-          true,
-        ),
-        this.request<Array<Record<string, unknown>>>(
-          'GET',
-          '/fapi/v1/openAlgoOrders',
-          { algoType: 'CONDITIONAL' },
-          true,
-        ),
-        this.request<Record<string, unknown>>(
-          'GET',
-          '/fapi/v1/accountConfig',
-          {},
-          true,
-        ),
-      ]);
+    const [
+      balances,
+      positions,
+      configurations,
+      openOrders,
+      algoOrders,
+      account,
+    ] = await Promise.all([
+      this.request<Array<Record<string, unknown>>>(
+        'GET',
+        '/fapi/v3/balance',
+        {},
+        true,
+      ),
+      this.request<Array<Record<string, unknown>>>(
+        'GET',
+        '/fapi/v3/positionRisk',
+        {},
+        true,
+      ),
+      this.request<Array<Record<string, unknown>>>(
+        'GET',
+        '/fapi/v1/symbolConfig',
+        {},
+        true,
+      ),
+      this.request<Array<Record<string, unknown>>>(
+        'GET',
+        '/fapi/v1/openOrders',
+        {},
+        true,
+      ),
+      this.request<Array<Record<string, unknown>>>(
+        'GET',
+        '/fapi/v1/openAlgoOrders',
+        { algoType: 'CONDITIONAL' },
+        true,
+      ),
+      this.request<Record<string, unknown>>(
+        'GET',
+        '/fapi/v1/accountConfig',
+        {},
+        true,
+      ),
+    ]);
     const usdt = balances.find((item) => item.asset === 'USDT');
     if (!usdt) throw new Error('币安 U 本位账户没有返回 USDT 余额');
+    const configurationBySymbol = this.configurationMap(configurations);
     const parsedPositions = positions
-      .map((row) => this.parsePosition(row))
+      .map((row) =>
+        this.parsePosition(row, configurationBySymbol.get(String(row.symbol))),
+      )
       .filter((row): row is ExchangePosition => row !== null);
     const parsedOpenOrders: NormalOpenOrder[] = openOrders.map((row) => {
       const side = row.side;

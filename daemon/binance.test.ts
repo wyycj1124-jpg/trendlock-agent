@@ -77,3 +77,86 @@ void test('Binance protective order uses the migrated algo endpoint without quan
     globalThis.fetch = originalFetch;
   }
 });
+
+void test('Binance V3 positions obtain leverage and margin type from symbolConfig', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      if (url.includes('/fapi/v1/time')) {
+        return new Response(JSON.stringify({ serverTime: Date.now() }), {
+          status: 200,
+        });
+      }
+      if (url.includes('/fapi/v3/balance')) {
+        return new Response(
+          JSON.stringify([
+            { asset: 'USDT', balance: '50', availableBalance: '40' },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/fapi/v3/positionRisk')) {
+        return new Response(
+          JSON.stringify([
+            {
+              symbol: 'LINKUSDT',
+              positionSide: 'LONG',
+              positionAmt: '1',
+              entryPrice: '18',
+              markPrice: '19',
+              unRealizedProfit: '1',
+            },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/fapi/v1/symbolConfig')) {
+        return new Response(
+          JSON.stringify([
+            {
+              symbol: 'LINKUSDT',
+              marginType: 'ISOLATED',
+              leverage: 3,
+            },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (
+        url.includes('/fapi/v1/openOrders') ||
+        url.includes('/fapi/v1/openAlgoOrders')
+      ) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (url.includes('/fapi/v1/accountConfig')) {
+        return new Response(
+          JSON.stringify({ canTrade: true, dualSidePosition: true }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({ code: -1, msg: 'unexpected test request' }),
+        { status: 400 },
+      );
+    };
+    const gateway = new BinanceFuturesGateway(
+      loadConfig({
+        TRENDLOCK_MODE: 'TESTNET',
+        BINANCE_API_KEY: 'test-key',
+        BINANCE_SECRET_KEY: 'test-secret',
+      }),
+    );
+    const snapshot = await gateway.getAccountSnapshot();
+    assert.equal(snapshot.positions[0]?.leverage, 3);
+    assert.equal(snapshot.positions[0]?.marginType, 'ISOLATED');
+    assert.equal(snapshot.equity, 51);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -41,6 +41,18 @@ void test('config remains dry-run by default and live requires an exact acknowle
   );
 });
 
+void test('config rejects credentials containing non-ASCII prompt text', () => {
+  assert.throws(
+    () =>
+      loadConfig({
+        TRENDLOCK_MODE: 'TESTNET',
+        BINANCE_API_KEY: 'key：copied-prompt',
+        BINANCE_SECRET_KEY: 'secret',
+      }),
+    /BINANCE_API_KEY 只能包含可打印 ASCII/,
+  );
+});
+
 void test('exchange quantization rounds quantity down and stops away from market', () => {
   assert.equal(floorToStep(1.239, 0.01), 1.23);
   assert.equal(quantizeStop(93.007, 0.01, 'LONG'), 93);
