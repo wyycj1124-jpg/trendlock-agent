@@ -40,6 +40,17 @@ TrendLock 是为 Binance Agent OS Mini Hackathon 制作的合约决策与 PAPER 
 
 当前连接暴露的 U 本位新订单工具虽然列出 `STOP_MARKET`，却没有暴露必需的 `stopPrice` / `closePosition` 参数，也没有原生合约网格工具。因此当前版本可以自动排名、生成只读预检和等待确认，但会在真实开仓前返回 `EXECUTION_BLOCKED`：不允许出现“开仓成功、服务器止损未创建”的窗口。
 
+## 本地自动化核心
+
+`daemon/` 新增了不依赖 MCP 确认或大模型轮询的本地常驻核心。它默认 `DRY_RUN`，支持趋势多空成交读回、服务器硬止损、先建后撤的阶梯/ATR 改单、双槽位、重启恢复、熔断、审计与本地日报。实盘采用 Binance 官方 USDⓈ-M API，必须使用本机受限 API Key 和显式风险解锁；未知人工仓位不会被接管。网格和持仓评分下降提前退出仍失败关闭。
+
+完整操作与风险边界见 [本地自动化核心说明](docs/AUTONOMOUS_DAEMON.md)。先运行：
+
+```bash
+npm run daemon:smoke
+npm run daemon:doctor
+```
+
 ## 双槽位审批流程
 
 1. 用 Binance MCP 只读获取 U 本位余额、非零持仓、全部未成交委托和持仓模式。
