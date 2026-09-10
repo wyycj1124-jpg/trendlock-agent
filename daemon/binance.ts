@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { formatDecimal } from './math.ts';
+import { decimalPlaces, formatDecimal } from './math.ts';
 import type {
   AccountSnapshot,
   EntryFill,
@@ -106,7 +106,7 @@ export class BinanceFuturesGateway implements ExchangeGateway {
       });
     } catch (error) {
       throw new BinanceApiError(
-        `币安网络请求失败：${error instanceof Error ? error.message : '未知错误'}`,
+        `币安 ${method} ${path} 网络请求失败：${error instanceof Error ? error.message : '未知错误'}`,
         0,
       );
     }
@@ -128,7 +128,11 @@ export class BinanceFuturesGateway implements ExchangeGateway {
           : typeof data.msg === 'string'
             ? data.msg
             : `Binance Futures HTTP ${response.status}`;
-      throw new BinanceApiError(message, response.status, code);
+      throw new BinanceApiError(
+        `币安 ${method} ${path}${code === undefined ? '' : ` (code ${code})`}：${message}`,
+        response.status,
+        code,
+      );
     }
     return payload as T;
   }
@@ -416,6 +420,7 @@ export class BinanceFuturesGateway implements ExchangeGateway {
   }
 
   async placeMarketEntry(request: EntryRequest): Promise<EntryFill> {
+    const rules = await this.getSymbolRules(request.symbol);
     const response = await this.request<Record<string, unknown>>(
       'POST',
       '/fapi/v1/order',
@@ -424,7 +429,10 @@ export class BinanceFuturesGateway implements ExchangeGateway {
         side: request.side === 'LONG' ? 'BUY' : 'SELL',
         positionSide: request.positionSide,
         type: 'MARKET',
-        quantity: formatDecimal(request.quantity),
+        quantity: formatDecimal(
+          request.quantity,
+          decimalPlaces(rules.stepSize),
+        ),
         newClientOrderId: request.clientOrderId,
         newOrderRespType: 'RESULT',
       },
@@ -456,6 +464,7 @@ export class BinanceFuturesGateway implements ExchangeGateway {
   }
 
   async placeProtectiveStop(request: StopRequest) {
+    const rules = await this.getSymbolRules(request.symbol);
     const response = await this.request<Record<string, unknown>>(
       'POST',
       '/fapi/v1/algoOrder',
@@ -465,7 +474,10 @@ export class BinanceFuturesGateway implements ExchangeGateway {
         side: request.side === 'LONG' ? 'SELL' : 'BUY',
         positionSide: request.positionSide,
         type: 'STOP_MARKET',
-        triggerPrice: formatDecimal(request.triggerPrice),
+        triggerPrice: formatDecimal(
+          request.triggerPrice,
+          decimalPlaces(rules.tickSize),
+        ),
         workingType: 'MARK_PRICE',
         closePosition: true,
         clientAlgoId: request.clientAlgoId,
@@ -493,6 +505,7 @@ export class BinanceFuturesGateway implements ExchangeGateway {
   }
 
   async emergencyClose(position: ExchangePosition, clientOrderId: string) {
+    const rules = await this.getSymbolRules(position.symbol);
     await this.request(
       'POST',
       '/fapi/v1/order',
@@ -501,7 +514,10 @@ export class BinanceFuturesGateway implements ExchangeGateway {
         side: position.side === 'LONG' ? 'SELL' : 'BUY',
         positionSide: position.positionSide,
         type: 'MARKET',
-        quantity: formatDecimal(position.quantity),
+        quantity: formatDecimal(
+          position.quantity,
+          decimalPlaces(rules.stepSize),
+        ),
         ...(position.positionSide === 'BOTH' ? { reduceOnly: true } : {}),
         newClientOrderId: clientOrderId,
         newOrderRespType: 'RESULT',

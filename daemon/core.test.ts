@@ -8,7 +8,7 @@ import { defaults } from '../lib/engine.ts';
 import { loadConfig } from './config.ts';
 import { TrendLockCore } from './core.ts';
 import { DryRunGateway } from './dry-run.ts';
-import { floorToStep, quantizeStop } from './math.ts';
+import { floorToStep, formatDecimal, quantizeStop } from './math.ts';
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'trendlock-test-'));
@@ -57,6 +57,9 @@ void test('exchange quantization rounds quantity down and stops away from market
   assert.equal(floorToStep(1.239, 0.01), 1.23);
   assert.equal(quantizeStop(93.007, 0.01, 'LONG'), 93);
   assert.equal(quantizeStop(106.993, 0.01, 'SHORT'), 107);
+  assert.equal(formatDecimal(2299.34, 2), '2299.34');
+  assert.equal(formatDecimal(0.011, 3), '0.011');
+  assert.equal(formatDecimal(10, 0), '10');
 });
 
 void test('dry-run opens only trend candidates with verified server-style protection and raises stop', async () => {

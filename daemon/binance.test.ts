@@ -22,6 +22,29 @@ void test('Binance protective order uses the migrated algo endpoint without quan
           status: 200,
         });
       }
+      if (url.includes('/fapi/v1/exchangeInfo')) {
+        return new Response(
+          JSON.stringify({
+            symbols: [
+              {
+                symbol: 'LINKUSDT',
+                status: 'TRADING',
+                filters: [
+                  { filterType: 'PRICE_FILTER', tickSize: '0.01' },
+                  {
+                    filterType: 'MARKET_LOT_SIZE',
+                    minQty: '0.001',
+                    maxQty: '10000',
+                    stepSize: '0.001',
+                  },
+                  { filterType: 'MIN_NOTIONAL', notional: '5' },
+                ],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
       const params = new URLSearchParams(body || url.split('?')[1]);
       const order = {
         algoId: 42,
@@ -32,7 +55,7 @@ void test('Binance protective order uses the migrated algo endpoint without quan
         side: 'SELL',
         positionSide: 'BOTH',
         algoStatus: 'NEW',
-        triggerPrice: '18.000',
+        triggerPrice: '2299.34',
         workingType: 'MARK_PRICE',
         closePosition: true,
       };
@@ -57,10 +80,10 @@ void test('Binance protective order uses the migrated algo endpoint without quan
       symbol: 'LINKUSDT',
       side: 'LONG',
       positionSide: 'BOTH',
-      triggerPrice: 18,
+      triggerPrice: 2299.34,
       clientAlgoId: 'TL-test',
     });
-    assert.equal(result.triggerPrice, 18);
+    assert.equal(result.triggerPrice, 2299.34);
     const request = requests.find(
       (item) =>
         item.url.includes('/fapi/v1/algoOrder') && item.method === 'POST',
@@ -69,6 +92,7 @@ void test('Binance protective order uses the migrated algo endpoint without quan
     assert.equal(body.get('algoType'), 'CONDITIONAL');
     assert.equal(body.get('type'), 'STOP_MARKET');
     assert.equal(body.get('workingType'), 'MARK_PRICE');
+    assert.equal(body.get('triggerPrice'), '2299.34');
     assert.equal(body.get('closePosition'), 'true');
     assert.equal(body.has('quantity'), false);
     assert.equal(body.has('reduceOnly'), false);

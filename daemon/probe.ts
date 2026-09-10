@@ -18,6 +18,9 @@ type ProbeOptions = {
 const delay = (milliseconds: number) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+const formatProbeNumber = (value: number) =>
+  Number.isFinite(value) ? value.toString() : '无效';
+
 function probeId(symbol: string, kind: 'E' | 'S' | 'T' | 'X') {
   return `TLP${Date.now().toString(36)}${kind}${symbol.slice(0, 8)}${randomUUID().replaceAll('-', '').slice(0, 6)}`.slice(
     0,
@@ -134,9 +137,12 @@ export async function runTestnetProbe(
   let initialProtection: ProtectiveOrder | undefined;
   let tighterProtection: ProtectiveOrder | undefined;
   let position: ExchangePosition | undefined;
+  let stage = '设置逐仓模式';
   try {
     await exchange.setIsolatedMargin(symbol);
+    stage = `设置 ${leverage}x 杠杆`;
     await exchange.setLeverage(symbol, leverage);
+    stage = `市价开仓（${symbol} quantity=${formatProbeNumber(quantity)} stepSize=${formatProbeNumber(rules.stepSize)}）`;
     const fill = await exchange.placeMarketEntry({
       symbol,
       side: 'LONG',
@@ -161,6 +167,7 @@ export async function runTestnetProbe(
     if (position.markPrice <= initialTrigger) {
       throw new Error('价格已越过初始测试止损，不创建过期保护');
     }
+    stage = `创建初始止损（triggerPrice=${formatProbeNumber(initialTrigger)} tickSize=${formatProbeNumber(rules.tickSize)}）`;
     initialProtection = await exchange.placeProtectiveStop({
       symbol,
       side: 'LONG',
@@ -179,6 +186,7 @@ export async function runTestnetProbe(
     if (position.markPrice <= tighterTrigger) {
       throw new Error('价格已越过收紧测试线，保留初始止损并停止改单测试');
     }
+    stage = `创建收紧止损（triggerPrice=${formatProbeNumber(tighterTrigger)} tickSize=${formatProbeNumber(rules.tickSize)}）`;
     tighterProtection = await exchange.placeProtectiveStop({
       symbol,
       side: 'LONG',
@@ -197,6 +205,7 @@ export async function runTestnetProbe(
     ) {
       throw new Error('新旧保护未同时读回，拒绝撤销旧保护');
     }
+    stage = '撤销旧止损';
     await exchange.cancelProtectiveStop(initialProtection);
     const afterReplacement = await exchange.getOpenProtectiveStops(symbol);
     if (
@@ -210,6 +219,7 @@ export async function runTestnetProbe(
       throw new Error('先建后撤的最终保护状态不一致');
     }
 
+    stage = '市价平掉测试仓位';
     await exchange.emergencyClose(position, probeId(symbol, 'X'));
     const cleanupErrors = await cleanup(exchange, symbol, positionSide);
     if (cleanupErrors.length) throw new Error(cleanupErrors.join('；'));
@@ -237,7 +247,7 @@ export async function runTestnetProbe(
     };
   } catch (error) {
     const cleanupErrors = await cleanup(exchange, symbol, positionSide);
-    const detail = error instanceof Error ? error.message : '未知错误';
+    const detail = `${stage}：${error instanceof Error ? error.message : '未知错误'}`;
     throw new Error(
       cleanupErrors.length
         ? `TESTNET 探针失败：${detail}；清理异常：${cleanupErrors.join('；')}`
